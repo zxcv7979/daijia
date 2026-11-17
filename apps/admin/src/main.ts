@@ -113,7 +113,10 @@ app.innerHTML = `
           <button id="start-mock" type="button">启动模拟源</button>
           <button id="health-official" type="button">检查官方桩</button>
           <button id="delete-raw" type="button">删除加密原文</button>
+          <button id="retention-dry" type="button">预演清理到期照片</button>
         </div>
+        <label class="check"><input id="mute-effects" type="checkbox" /> 静音特效</label>
+        <label class="check"><input id="preset-only" type="checkbox" /> 仅预设角色</label>
         <p id="adapter-note" class="muted"></p>
         <div id="audit" class="audit"></div>
       </div>
@@ -576,6 +579,30 @@ must<HTMLButtonElement>("health-official").addEventListener("click", () => {
   void api<Record<string, unknown>>("/api/adapters/official/health")
     .then((body) => {
       must<HTMLParagraphElement>("adapter-note").textContent = `官方桩 ${String(body.state ?? "")} ${String(body.detail ?? "")}`;
+    })
+    .catch(showPageError);
+});
+
+function pushShowMode() {
+  void api("/api/ops/mode", {
+    method: "POST",
+    body: JSON.stringify({
+      mute: must<HTMLInputElement>("mute-effects").checked,
+      preset_only: must<HTMLInputElement>("preset-only").checked,
+    }),
+  }).catch(showPageError);
+}
+
+must<HTMLInputElement>("mute-effects").addEventListener("change", pushShowMode);
+must<HTMLInputElement>("preset-only").addEventListener("change", pushShowMode);
+
+must<HTMLButtonElement>("retention-dry").addEventListener("click", () => {
+  void api<{ candidates: number }>("/api/ops/retention", {
+    method: "POST",
+    body: JSON.stringify({ dry_run: true }),
+  })
+    .then((body) => {
+      must<HTMLParagraphElement>("adapter-note").textContent = `预演将清理 ${body.candidates} 张到期照片，尚未删除`;
     })
     .catch(showPageError);
 });

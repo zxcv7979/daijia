@@ -11,6 +11,7 @@ from src.adapters.crypto import decrypt, derive_key, encrypt
 from src.avatar.glb import write_likeness_glb
 from src.avatar.gpu import describe_gpu
 from src.avatar.qa import check_photo_bytes, texture_png
+from src.ops.degrade import PRESET_FALLBACK
 from src.store import Store
 
 PRESETS = (
@@ -55,6 +56,7 @@ class AvatarLibrary:
         self.salt = salt
         self.retention_days = retention_days
         self.seed = seed
+        self.on_face_access = None
         self.avatar_dir = root / "data" / "avatars"
         self.derived = self.avatar_dir / "derived"
         self.derived.mkdir(parents=True, exist_ok=True)
@@ -109,10 +111,17 @@ class AvatarLibrary:
         generator = "parametric-fallback"
         gpu = describe_gpu()
         glb_rel = ""
+        fallback = PRESET_FALLBACK if reasons else ""
         if not reasons:
-            texture = texture_png(photos[0][1])
-            glb_rel = f"derived/{avatar}.glb"
-            write_likeness_glb(self.avatar_dir / glb_rel, seed=self.seed, texture=texture)
+            try:
+                texture = texture_png(photos[0][1])
+                glb_rel = f"derived/{avatar}.glb"
+                write_likeness_glb(self.avatar_dir / glb_rel, seed=self.seed, texture=texture)
+            except Exception:
+                reasons.append("生成失败，已改用预设角色")
+                status = "failed"
+                glb_rel = ""
+                fallback = PRESET_FALLBACK
         key = derive_key(self.salt)
         retain = now + self.retention_days * 86400
         photo_ids = []
@@ -135,8 +144,10 @@ class AvatarLibrary:
                 "glb_rel": glb_rel,
                 "created_at": now,
                 "photo_ids": photo_ids,
+                "fallback_avatar_id": fallback,
             }
         )
+        self._face("store", job_id, len(photo_ids))
         if not reasons:
             self.store.save_avatar(
                 {
@@ -169,6 +180,7 @@ class AvatarLibrary:
         photos = self.store.list_avatar_photos(job_id)
         if not photos:
             raise AvatarError(400, "原照片已删除，请重新上传")
+        self._face("read", job_id, len(photos))
         key = derive_key(self.salt)
         first = decrypt(key, photos[0]["blob"])
         seed = int(job["seed"]) + 1
@@ -191,6 +203,7 @@ class AvatarLibrary:
                     path.unlink()
             self.store.delete_avatar_job(job["job_id"])
         self.store.delete_avatar(avatar_id)
+        self._face("delete", jobs[0]["job_id"] if jobs else "", removed_photos)
         return {"avatar_id": avatar_id, "deleted_photos": removed_photos, "deleted_jobs": len(jobs)}
 
     def _job(self, job_id: str) -> dict:
@@ -198,6 +211,11 @@ class AvatarLibrary:
         if job is None:
             raise AvatarError(404, "找不到这个任务")
         return job
+
+    def _face(self, op: str, job_id: str, count: int) -> None:
+        if self.on_face_access is None:
+            return
+        self.on_face_access({"op": op, "job_id": job_id, "photo_count": count})
 
 
 def sensitive_block(*, subject_is_minor: bool, sensitive: bool) -> str | None:

@@ -160,7 +160,18 @@ python -m pytest -q tests/test_load.py
 - `normalize.danmaku_aggregate_window_ms`：必须是 `200`。
 - `emotion.rise_ms`：150–300。`decay_half_life_s`：4–8。`max_on_screen` 和 `ducking` 控制同时在场的情绪。
 - `print_show.default_duration_sec`：默认 45 秒，管理页限制在 30–60。进度点固定 25/50/75/90/100。层纹、环绕、揭晓灯和插队规则见 [docs/p5-print-show.md](docs/p5-print-show.md)。全息可以排到正在打印的任务后面，不会把热床上的那一件挤掉。画面只改裁切平面，不连真实打印机。
-- `bus.reconnect_buffer_sec`：必须是 30。
+- `bus.reconnect_buffer_sec`：必须是 30。断线后特效页先播本地罐头动画，恢复时按序号补发。
+- `compliance.yaml` 的 `retention.retention_days`：到期照片清理。管理页可以预演。见 [docs/go-live-checklist.md](docs/go-live-checklist.md)。
+
+## 浸泡和降级
+
+```bash
+python3 scripts/soak_hook.py --duration 30 --interval 0.5
+bash scripts/soak_8h.sh 600
+bash scripts/soak_8h.sh 28800
+```
+
+帧时间超预算，或 CPU/GPU 利用率过高，会把特效质量降到 P3 的同一套档位。断网时画面继续播罐头动画，不黑屏。角色生成失败回到预设圆圆。8 小时 OBS 实机数字见 [docs/p6-soak-report.md](docs/p6-soak-report.md)，这里标成待实机验收。已知缺口在 [docs/p6-issues.md](docs/p6-issues.md)。
 
 映射在 `config/mappings.yaml`：
 
@@ -227,6 +238,7 @@ SQLite 在 `data/live_show.db`，存打码后的事件、虚拟打印任务和�
 - [x] 30 秒重连缓冲有效。`test_buffer_keeps_30s_and_replays_cursor` 用假时钟推进到 31 秒；`test_ws_replays_missed_events_and_strips_pii` 在断开期间触发 L4，重连后能补到 `fx_cue`。
 - [x] YAML 热加载。合法修改立刻改变 L0 情绪；非法 YAML 返回 400，进程和旧映射都还在。`test_api_rejects_bad_yaml_and_keeps_serving`。
 - [x] 管理页能触发 L0–L4，也能创建虚拟打印并跑到 `done`。对应 API 测试：`test_manual_levels_and_print_job`。页面按钮走同一组接口。时间轴可拖到任意进度。队列、插队和失败补偿见 `tests/test_print_timeline.py`。实机 60fps 与 20 条画面泄漏检查为待实机验收，无头脚本是 `python scripts/print_queue_bench.py --jobs 20`。
+- [x] 降档、断线罐头、上下文恢复、30 秒补发、照片保留期和人脸访问审计见 `tests/test_p6_ops.py`。8 小时 OBS 浸泡为待实机验收。
 - [x] 三个剧本可从 API 启动。小礼物合并成一条 `combo_count=10` 的喜悦事件且不打印；榜一礼物开出全息任务且情绪保持震撼。`test_scripted_scenes`。
 - [x] `REAL_SOURCE` 关闭时，回放、模拟源和演示管道仍可用。没有二次确认就不会写 `real_source_enabled`。`test_real_source_off_keeps_demo_and_blocks_silent_enable`。
 - [x] 二次确认后可以健康检查官方桩，状态是降级，推送条数为 0，并写审计。`test_confirmed_real_source_audits_and_degrades`。

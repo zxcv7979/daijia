@@ -343,6 +343,22 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_photo_retention(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT photo_id, job_id, created_at, retain_until FROM avatar_photos"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_photos(self, photo_ids: list[str]) -> int:
+        if not photo_ids:
+            return 0
+        marks = ",".join("?" for _ in photo_ids)
+        with self._lock:
+            cur = self._conn.execute(f"DELETE FROM avatar_photos WHERE photo_id IN ({marks})", list(photo_ids))
+            self._conn.commit()
+            return int(cur.rowcount)
+
     def delete_avatar_photos(self, job_id: str) -> int:
         with self._lock:
             cur = self._conn.execute("DELETE FROM avatar_photos WHERE job_id = ?", (job_id,))

@@ -21,6 +21,7 @@ export type SceneHandle = {
   setQuality: (level: number) => void;
   tick: (time: number) => void;
   resize: (width: number, height: number) => void;
+  recoverContext: () => boolean;
 };
 
 const EMOTION_COLOR: Record<string, number> = {
@@ -44,6 +45,29 @@ export function createScene(width: number, height: number): SceneHandle | null {
   } catch {
     return null;
   }
+  let recoveries = 0;
+  const onLost = (event: Event) => {
+    event.preventDefault();
+    (window as Window & { __contextLost?: boolean }).__contextLost = true;
+  };
+  const onRestored = () => {
+    renderer.setSize(width, height, false);
+    renderer.localClippingEnabled = true;
+    renderer.setClearColor(0x000000, 0);
+    recoveries += 1;
+    (window as Window & { __contextRecovery?: { count: number; black: boolean; perFrameRebuild: boolean } }).__contextRecovery = {
+      count: recoveries,
+      black: false,
+      perFrameRebuild: false,
+    };
+    void fetch("/api/overlay/context-loss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }).catch(() => undefined);
+  };
+  canvas.addEventListener("webglcontextlost", onLost);
+  canvas.addEventListener("webglcontextrestored", onRestored);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(32, width / height, 0.1, 40);
@@ -292,6 +316,13 @@ export function createScene(width: number, height: number): SceneHandle | null {
       camera.aspect = nextWidth / nextHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(nextWidth, nextHeight, false);
+    },
+    recoverContext() {
+      const ext = renderer.getContext().getExtension("WEBGL_lose_context");
+      if (!ext) return false;
+      ext.loseContext();
+      window.setTimeout(() => ext.restoreContext(), 40);
+      return true;
     },
     tick(time) {
       const blink = Math.sin(time * 0.7) > 0.97 ? 1 : 0;

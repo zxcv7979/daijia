@@ -75,7 +75,11 @@ class Context:
             retention_days=avatar_cfg.photo_retention_days,
             seed=avatar_cfg.seed,
         )
+        self.avatars.on_face_access = self._audit_face
         self.active_avatar_id = "preset-yuan"
+        self.preset_only = False
+        self.force_quality: int | None = None
+        self._alerted_drops = 0
 
     async def startup(self) -> None:
         if self.settings.collection_enabled():
@@ -140,6 +144,7 @@ class Context:
             result = self.normalizer.feed(raw)
         except Exception:
             self.stats.dropped += 1
+            self._alert_drops()
             logger.exception("规范化失败")
             return {"ok": False, "reason": "dropped"}
         if result.op == NormOp.duplicate or result.event is None:
@@ -153,6 +158,7 @@ class Context:
             self.bus.publish("event", {"op": result.op.value, "event": public})
         except Exception:
             self.stats.dropped += 1
+            self._alert_drops()
             logger.exception("事件发布失败")
             return {"ok": False, "reason": "dropped"}
         self.stats.published += 1
@@ -244,6 +250,8 @@ class Context:
             "real_source_env_blocked": self.real_source_blocked_by_env(),
             "official_adapter": "disabled",
             "note": "真实源默认关闭。二次确认后也只注册桩适配器，不连接平台。",
+            "retention_days": self.settings.retention_days(),
+            "preset_only": self.preset_only,
         }
 
     def save_encrypted_raw(self, adapter: str, payload: dict[str, object]) -> dict[str, object]:
@@ -283,6 +291,8 @@ class Context:
             "sfx": overlay.sfx,
             "performances": performances,
             "seek": self.overlay_control.get("seek"),
+            "load_level": 0 if self.force_quality is None else self.force_quality,
+            "preset_only": self.preset_only,
         }
 
     def update_overlay_control(
@@ -300,7 +310,33 @@ class Context:
             self.overlay_control["seek"] = max(0.0, min(1.0, seek))
         return self.overlay_public_config()
 
+    def set_show_mode(self, *, mute: bool | None = None, preset_only: bool | None = None, load_level: int | None = None) -> dict[str, object]:
+        if mute is not None:
+            self.overlay_control["mute"] = mute
+        if preset_only is not None:
+            self.preset_only = preset_only
+            if preset_only and not str(self.active_avatar_id).startswith("preset-"):
+                self.active_avatar_id = "preset-yuan"
+        if load_level is not None:
+            self.force_quality = max(0, min(2, load_level))
+        self.audit.record(
+            "show_mode",
+            {"mute": bool(self.overlay_control.get("mute")), "preset_only": self.preset_only, "load_level": self.force_quality},
+        )
+        return self.overlay_public_config()
+
+    def _audit_face(self, detail: dict[str, object]) -> None:
+        safe = {key: value for key, value in detail.items() if key != "blob"}
+        self.audit.record("face_access", safe)
+
+    def _alert_drops(self) -> None:
+        if self.stats.dropped <= self._alerted_drops:
+            return
+        self._alerted_drops = self.stats.dropped
+        self.audit.record("alert_drop", {"dropped": self.stats.dropped})
+
     def record_overlay_stats(self, stats: dict[str, object]) -> dict[str, object]:
+        previous = int(self.overlay_stats.get("level") or 0)
         self.overlay_stats = {
             "fps": float(stats.get("fps") or 0),
             "frame_ms": float(stats.get("frame_ms") or 0),
@@ -311,6 +347,9 @@ class Context:
             "heap": int(stats.get("heap") or 0),
             "renderer": str(stats.get("renderer") or "none"),
         }
+        level = int(self.overlay_stats["level"])
+        if level > previous:
+            self.audit.record("alert_quality", {"level": level, "frame_ms": self.overlay_stats["frame_ms"]})
         heap = int(self.overlay_stats["heap"])
         if heap:
             self.overlay_heap.append(heap)

@@ -272,12 +272,19 @@ class MappingsSpec(BaseModel):
         return self
 
 
+class RetentionCfg(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    retention_days: int = Field(default=7, ge=1, le=3650)
+
+
 class ComplianceSpec(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     pii: dict[str, Any] = Field(default_factory=dict)
     audit: dict[str, Any] = Field(default_factory=dict)
     live_collection: dict[str, Any] = Field(default_factory=dict)
+    retention: RetentionCfg = Field(default_factory=RetentionCfg)
 
 
 def _read_text(path: Path) -> str:
@@ -334,6 +341,9 @@ class Settings:
         if not raw.is_absolute():
             raw = self.root / raw
         return raw
+
+    def retention_days(self) -> int:
+        return int(self.compliance_model.retention.retention_days)
 
     def audit_path(self) -> Path:
         rel = str(self.compliance_model.audit.get("path") or "data/audit/audit.jsonl")

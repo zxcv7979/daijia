@@ -1,7 +1,7 @@
 import "./style.css";
 import { createScene } from "./scene";
 import { createFx, type FxPerformance } from "./fx";
-import { stepQuality, type Quality, type QualityConfig } from "./quality";
+import { applyLoad, stepQuality, type Quality, type QualityConfig } from "./quality";
 
 type Envelope = {
   v: number;
@@ -18,6 +18,8 @@ type OverlayConfig = QualityConfig & {
   sfx: Record<string, string>;
   performances: Record<string, FxPerformance & { emotion?: string; print?: string | null }>;
   seek: number | null;
+  load_level: number;
+  preset_only: boolean;
 };
 
 const params = new URLSearchParams(location.search);
@@ -51,6 +53,8 @@ const fallbackConfig: OverlayConfig = {
   sfx: {},
   performances: {},
   seek: null,
+  load_level: 0,
+  preset_only: false,
 };
 
 let config = fallbackConfig;
@@ -104,6 +108,7 @@ function performanceFor(fxName: string): FxPerformance {
 }
 
 let lastSeq = 0;
+let linkDown = false;
 function connect() {
   let backoff = 500;
   const open = () => {
@@ -111,9 +116,16 @@ function connect() {
     const since = lastSeq > 0 ? String(lastSeq) : "0";
     const socket = new WebSocket(`${proto}://${location.host}/ws?since_seq=${since}`);
     socket.onopen = () => {
+      linkDown = false;
       backoff = 500;
     };
-    socket.onclose = () => window.setTimeout(open, backoff);
+    socket.onclose = () => {
+      linkDown = true;
+      scene?.timeline.play();
+      (window as Window & { __linkDown?: boolean }).__linkDown = true;
+      window.setTimeout(open, backoff);
+      backoff = Math.min(backoff * 2, 5000);
+    };
     socket.onmessage = (ev) => {
       const msg = JSON.parse(String(ev.data)) as Envelope;
       if (typeof msg.seq === "number" && msg.seq > lastSeq) lastSeq = msg.seq;
@@ -195,7 +207,12 @@ function loop(now: number) {
   fx?.tick(dt, quality.level);
   const sample = performance.now() - workStart;
   workMs = workMs * 0.85 + sample * 0.15;
-  quality = stepQuality(quality, sample, config);
+  quality = applyLoad(stepQuality(quality, sample, config), config.load_level);
+  if (linkDown && scene) {
+    printProgress = (printProgress + dt * (100 / 45)) % 100;
+    scene.setPrint(printProgress);
+    printHud = "断线保持";
+  }
   if (now - fpsStamp >= 500) {
     fps = Math.round((frames * 1000) / (now - fpsStamp));
     frames = 0;

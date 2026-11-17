@@ -160,6 +160,7 @@ async def put_mappings(body: MappingIn, request: Request) -> dict[str, object]:
     except ConfigError as exc:
         # 非法 YAML 不能拖垮进程，旧映射继续生效。
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ctx.audit.record("mapping_reloaded", {"bytes": len(body.yaml)})
     return {"ok": True, "error": None}
 
 
@@ -277,6 +278,10 @@ async def create_job(body: PrintIn, request: Request) -> dict[str, object]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _ctx(request).audit.record(
+        "print_trigger",
+        {"job_id": job.job_id, "style": job.style.value, "duration_sec": job.duration_sec},
+    )
     return dump_model(job)
 
 
@@ -467,6 +472,8 @@ async def blendshapes(emotion: str = "joy", intensity: float = 1.0) -> dict[str,
 @router.post("/api/avatars/active")
 async def activate_avatar(request: Request, avatar_id: str = Form(...)) -> dict[str, object]:
     ctx = _ctx(request)
+    if ctx.preset_only and not avatar_id.startswith("preset-"):
+        raise HTTPException(status_code=409, detail="当前是仅预设模式，不能换上照片角色")
     path = ctx.avatars.file_for(avatar_id)
     loaded = path is not None
     plan = switch_plan(current=ctx.active_avatar_id, incoming=avatar_id, loaded=loaded)
@@ -514,10 +521,13 @@ async def get_avatar_job(job_id: str, request: Request) -> dict[str, object]:
 
 @router.post("/api/avatars/jobs/{job_id}/approve")
 async def approve_avatar_job(job_id: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
     try:
-        return _public_job(_ctx(request).avatars.approve(job_id))
+        job = ctx.avatars.approve(job_id)
     except AvatarError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    ctx.audit.record("avatar_approved", {"job_id": job_id, "avatar_id": job.get("avatar_id")})
+    return _public_job(job)
 
 
 @router.post("/api/avatars/jobs/{job_id}/regenerate")
@@ -539,7 +549,49 @@ async def delete_avatar(avatar_id: str, request: Request) -> dict[str, object]:
         ctx.active_avatar_id = "preset-yuan"
         result["active"] = ctx.active_avatar_id
         result["plan"] = "crossfade"
+    ctx.audit.record("avatar_deleted", {"avatar_id": avatar_id, "deleted_photos": result["deleted_photos"]})
     return result
+
+
+class ShowModeIn(BaseModel):
+    mute: bool | None = None
+    preset_only: bool | None = None
+    load_level: int | None = Field(default=None, ge=0, le=2)
+
+
+class RetentionIn(BaseModel):
+    dry_run: bool = True
+
+
+@router.post("/api/ops/mode")
+async def show_mode(body: ShowModeIn, request: Request) -> dict[str, object]:
+    return _ctx(request).set_show_mode(mute=body.mute, preset_only=body.preset_only, load_level=body.load_level)
+
+
+@router.post("/api/ops/retention")
+async def retention_cleanup(body: RetentionIn, request: Request) -> dict[str, object]:
+    from src.ops.retention import cleanup_expired_photos
+
+    ctx = _ctx(request)
+    result = cleanup_expired_photos(
+        ctx.store,
+        now=ctx.clock.time(),
+        retention_days=ctx.settings.retention_days(),
+        dry_run=body.dry_run,
+    )
+    ctx.audit.record("retention_cleanup", result)
+    return result
+
+
+@router.post("/api/overlay/context-loss")
+async def context_loss(request: Request) -> dict[str, object]:
+    from src.ops.alerts import raise_alert
+    from src.ops.degrade import context_recovery_plan
+
+    ctx = _ctx(request)
+    plan = context_recovery_plan()
+    raise_alert(ctx.audit, "context_loss", {"action": plan["action"]})
+    return plan
 
 
 @router.get("/api/audit")

@@ -51,3 +51,8 @@ export function admitFx(active: number, cap: number): boolean {
 export function skipSecondary(level: number, secondary: boolean): boolean {
   return secondary && level >= 1;
 }
+
+export function applyLoad(state: Quality, loadLevel: number): Quality {
+  const level = Math.max(state.level, Math.max(0, Math.min(2, loadLevel)));
+  return { ...state, level, downshifted: level > 0 };
+}

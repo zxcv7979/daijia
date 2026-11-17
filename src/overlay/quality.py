@@ -56,3 +56,11 @@ def admit_fx(active: int, cap: int = 8) -> bool:
 
 def skip_secondary(level: int, secondary: bool) -> bool:
     return secondary and level >= 1
+
+
+def apply_load(frame_level: int, cpu: float | None = None, gpu: float | None = None) -> int:
+    """帧时间降档和主机负载取更严的一档。"""
+
+    from src.ops.degrade import combine_quality, load_level
+
+    return combine_quality(frame_level, load_level(cpu, gpu))
