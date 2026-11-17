@@ -318,6 +318,8 @@ class Context:
             "recover_under_ms": overlay.recover_under_ms,
             "mute": bool(self.overlay_control.get("mute")),
             "sfx": overlay.sfx,
+            "bgm": overlay.bgm,
+            "bgm_volume": overlay.bgm_volume,
             "performances": performances,
             "seek": self.overlay_control.get("seek"),
             "load_level": 0 if self.force_quality is None else self.force_quality,

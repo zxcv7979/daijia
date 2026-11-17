@@ -128,3 +128,6 @@ overlay:
     danmaku_float: ""
     print_progress_90: ""
     print_progress_100: ""
+  # 循环背景音乐，空字符串表示不播放。素材放在 apps/overlay/public/assets/。
+  bgm: "/overlay/assets/bgm.m4a"
+  bgm_volume: 0.3

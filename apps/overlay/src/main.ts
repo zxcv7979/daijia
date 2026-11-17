@@ -15,6 +15,8 @@ type OverlayConfig = QualityConfig & {
   transparent: boolean;
   mute: boolean;
   sfx: Record<string, string>;
+  bgm: string;
+  bgm_volume: number;
   performances: Record<string, FxPerformance & { emotion?: string; print?: string | null }>;
   seek: number | null;
   load_level: number;
@@ -50,6 +52,8 @@ const fallbackConfig: OverlayConfig = {
   max_particles: 20000,
   mute: false,
   sfx: {},
+  bgm: "",
+  bgm_volume: 0.3,
   performances: {},
   seek: null,
   load_level: 0,
@@ -82,6 +86,7 @@ async function pullConfig() {
     if (!response.ok) return;
     config = { ...fallbackConfig, ...(await response.json()) };
     muted = Boolean(config.mute);
+    applyBgm();
   } catch {
     /* 配置接口不可用时沿用上一份。 */
   }
@@ -93,6 +98,31 @@ function playCue(name: string) {
   const audio = new Audio(url);
   audio.play().catch(() => undefined);
 }
+
+// 循环背景音乐：跟随全局静音，首次交互后解锁自动播放限制。
+const bgm = new Audio();
+bgm.loop = true;
+bgm.preload = "auto";
+let bgmStarted = false;
+
+function applyBgm() {
+  const url = config.bgm;
+  if (!url || muted) {
+    bgm.pause();
+    return;
+  }
+  if (bgm.getAttribute("src") !== url) bgm.src = url;
+  bgm.volume = Math.min(1, Math.max(0, config.bgm_volume || 0.3));
+  if (bgmStarted) bgm.play().catch(() => undefined);
+}
+
+function unlockBgm() {
+  if (bgmStarted) return;
+  bgmStarted = true;
+  applyBgm();
+}
+window.addEventListener("pointerdown", unlockBgm, { once: true });
+window.addEventListener("keydown", unlockBgm, { once: true });
 
 function performanceFor(fxName: string): FxPerformance {
   const known = config.performances[fxName];

@@ -199,6 +199,9 @@ class OverlayCfg(BaseModel):
     mute: bool = False
     # 特效名 → 本地音频路径。空字符串表示静音，不自动发声。
     sfx: dict[str, str] = Field(default_factory=dict)
+    # 循环背景音乐路径（overlay 静态资源前缀），空字符串表示不播放。
+    bgm: str = ""
+    bgm_volume: float = Field(default=0.3, gt=0, le=1)
 
 
 class BusCfg(BaseModel):

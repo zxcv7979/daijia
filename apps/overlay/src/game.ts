@@ -16,7 +16,7 @@ type Particle = {
   max: number;
   size: number;
   color: number;
-  kind: "spark" | "glow" | "trail" | "leaf";
+  kind: "spark" | "glow" | "trail" | "leaf" | "ring";
   spin: number;
 };
 
@@ -51,6 +51,8 @@ type Bubble = {
   gift: boolean;
   name: string;
   roll: boolean;
+  combo?: number;
+  bornAt?: number;
 };
 
 type FloatScore = { x: number; y: number; text: string; life: number; max: number; color: number };
@@ -273,8 +275,9 @@ export function createGame(width: number, height: number): GameHandle | null {
         spin: (Math.random() - 0.5) * 6,
       });
     }
-    // 礼物爆发额外上抛金色光屑。
+    // 礼物爆发：双色礼花 + 上抛金色光屑 + 环形冲击波。
     if (gift) {
+      const confetti = [0xffe08a, 0xff8a3d, 0xff9eb5, 0xfff3c4];
       for (let i = 0; i < Math.floor(count / 2); i += 1) {
         particles.push({
           x: x + (Math.random() - 0.5) * 60,
@@ -284,9 +287,24 @@ export function createGame(width: number, height: number): GameHandle | null {
           life: 0.9 + Math.random() * 0.8,
           max: 1.7,
           size: 1.5 + Math.random() * 2.5,
-          color: 0xffe08a,
+          color: confetti[Math.floor(Math.random() * confetti.length)],
           kind: "leaf",
           spin: (Math.random() - 0.5) * 4,
+        });
+      }
+      // 两圈扩散冲击波。
+      for (let k = 0; k < 2; k += 1) {
+        particles.push({
+          x,
+          y,
+          vx: 120 + k * 60, // 扩张速度（px/s）
+          vy: 0,
+          life: 0.55 + k * 0.18,
+          max: 0.73,
+          size: 8 + k * 6, // 初始半径
+          color: 0xffd75e,
+          kind: "ring",
+          spin: 0,
         });
       }
     }
@@ -320,6 +338,7 @@ export function createGame(width: number, height: number): GameHandle | null {
       resetCombo(name);
       addScore(name, -15);
       burst(hole.x, hole.y, 0xe15a4a, 18);
+      particles.push({ x: hole.x, y: hole.y, vx: 130, vy: 0, life: 0.5, max: 0.5, size: 10, color: 0xe15a4a, kind: "ring", spin: 0 });
       flash = 1;
       pushFloat(hole.x, hole.y - 40, "-15", 0xe15a4a);
       onEvent?.("bomb");
@@ -336,10 +355,12 @@ export function createGame(width: number, height: number): GameHandle | null {
     hits += 1;
 
     if (mole.kind === "gold") {
-      burst(hole.x, hole.y, 0xf0c020, 26, true);
+      burst(hole.x, hole.y, 0xf0c020, 32, true);
+      particles.push({ x: hole.x, y: hole.y, vx: 150, vy: 0, life: 0.55, max: 0.55, size: 12, color: 0xffd75e, kind: "ring", spin: 0 });
       onEvent?.("gold");
     } else {
-      burst(hole.x, hole.y, 0x7ec86a, 14);
+      burst(hole.x, hole.y, 0x7ec86a, 20);
+      particles.push({ x: hole.x, y: hole.y, vx: 110, vy: 0, life: 0.45, max: 0.45, size: 9, color: 0x7ec86a, kind: "ring", spin: 0 });
       onEvent?.("hit");
     }
     pushFloat(
@@ -370,11 +391,28 @@ export function createGame(width: number, height: number): GameHandle | null {
 
     if (kind === "gift") {
       const combo = Number((t.match(/×\s*(\d+)/) ?? [])[1] ?? 1);
+      const giftName = t.replace(/×\s*\d+/g, "").trim() || "礼物";
       const mult = 1 + Math.min(4, Math.max(0, combo - 1)) * 0.1;
       addScore(name, Math.round(20 * mult));
       const alive = holes.filter((h) => h.mole && !h.mole.hit);
       if (alive.length) hitHole(alive[Math.floor(Math.random() * alive.length)], name);
-      bubbles.push({ text: t || "礼物奖励", x: width - 260, y: 320 + Math.random() * 80, vx: 0, life: 3, max: 3, gift: true, name, roll: false });
+      const giftCount = bubbles.filter((b) => b.gift).length;
+      const gx = width - 220;
+      const gy = 470 + giftCount * 82;
+      bubbles.push({
+        text: giftName,
+        combo,
+        x: gx,
+        y: gy,
+        vx: 0,
+        life: 3.2,
+        max: 3.2,
+        gift: true,
+        name,
+        roll: false,
+        bornAt: 3.2,
+      });
+      burst(gx, gy, 0xffd75e, 18, true);
       onEvent?.("gift");
       return true;
     }
@@ -534,21 +572,114 @@ export function createGame(width: number, height: number): GameHandle | null {
 
   /* ---------- 气泡 / 榜单 / 头像墙 ---------- */
 
-  function drawBubble(b: Bubble) {
+  function drawBubble(b: Bubble, now: number) {
     const alpha = Math.min(1, b.life / b.max);
+
+    // 礼物卡片：金色渐变底 + 礼盒图标 + 昵称/礼物名两行 + 入场弹入。
+    if (b.gift) {
+      const p = 1 - b.life / b.max;
+      const scale = p < 0.25 ? 0.55 + (p / 0.25) * 0.5 : 1;
+      const fy = b.y + Math.sin(now / 320 + b.x) * 3;
+      const combo = b.combo ?? 1;
+      const nameLine = b.name || "匿名观众";
+      const giftLine = combo > 1 ? `${b.text} ×${combo}` : b.text;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(b.x, fy);
+      ctx.scale(scale, scale);
+
+      ctx.font = "16px 'Microsoft YaHei', sans-serif";
+      const nameW = ctx.measureText(nameLine).width;
+      ctx.font = "bold 21px 'Microsoft YaHei', sans-serif";
+      const giftW = ctx.measureText(giftLine).width;
+      const textW = Math.max(nameW, giftW);
+      const w = 50 + textW + 32;
+      const h = 72;
+
+      const bg = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+      bg.addColorStop(0, "rgba(255,196,60,0.96)");
+      bg.addColorStop(1, "rgba(214,110,10,0.96)");
+      ctx.shadowColor = "rgba(255,180,60,0.7)";
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.roundRect(-w / 2, -h / 2, w, h, 18);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "rgba(255,242,208,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 扫过卡片的斜向高光。
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(-w / 2, -h / 2, w, h, 18);
+      ctx.clip();
+      const sweep = (now / 1500 + b.x / 500) % 1;
+      const sx = -w / 2 + sweep * w;
+      const shine = ctx.createLinearGradient(sx - 26, 0, sx + 26, 0);
+      shine.addColorStop(0, "rgba(255,255,255,0)");
+      shine.addColorStop(0.5, "rgba(255,255,255,0.32)");
+      shine.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = shine;
+      ctx.translate(sx, 0);
+      ctx.rotate(-0.35);
+      ctx.fillRect(-26, -h, 52, h * 2);
+      ctx.restore();
+
+      // 礼盒图标：红盒身 + 金丝带 + 蝴蝶结。
+      const ix = -w / 2 + 28;
+      ctx.fillStyle = "#b83a2a";
+      ctx.beginPath();
+      ctx.roundRect(ix - 16, -9, 32, 24, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffe08a";
+      ctx.fillRect(ix - 2.5, -9, 5, 24);
+      ctx.fillRect(ix - 16, -2, 32, 5);
+      ctx.beginPath();
+      ctx.arc(ix - 6, -13, 5, 0, Math.PI * 2);
+      ctx.arc(ix + 6, -13, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      const tx = ix + 28;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "16px 'Microsoft YaHei', sans-serif";
+      ctx.fillStyle = "#fff7ea";
+      ctx.fillText(nameLine, tx, -14);
+      ctx.font = "bold 21px 'Microsoft YaHei', sans-serif";
+      ctx.fillStyle = "#fff2c4";
+      ctx.fillText(giftLine, tx, 14);
+
+      // 角落闪烁星芒。
+      const tw = (Math.sin(now / 200 + b.x) + 1) / 2;
+      ctx.globalAlpha = alpha * (0.3 + 0.7 * tw);
+      ctx.fillStyle = "#fff";
+      drawStar(w / 2 - 12, -h / 2 + 12, 4);
+      const tw2 = (Math.sin(now / 230 + b.x + 2) + 1) / 2;
+      ctx.globalAlpha = alpha * (0.25 + 0.6 * tw2);
+      drawStar(-w / 2 + 14, h / 2 - 12, 3);
+
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    // 普通弹幕气泡。
     ctx.globalAlpha = alpha;
     const label = b.roll && b.name ? `${b.name}：${b.text}` : b.text;
     ctx.font = "bold 20px 'Microsoft YaHei', sans-serif";
     const w = ctx.measureText(label).width + 30;
     const h = 40;
-    ctx.fillStyle = b.gift ? "rgba(240,162,2,0.94)" : "rgba(28,32,42,0.82)";
-    ctx.strokeStyle = b.gift ? "#fff2d0" : hex(moodColor());
+    ctx.fillStyle = "rgba(28,32,42,0.82)";
+    ctx.strokeStyle = hex(moodColor());
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.roundRect(b.x - w / 2, b.y - h / 2, w, h, 14);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = b.gift ? "#1a1200" : "#f4f1ea";
+    ctx.fillStyle = "#f4f1ea";
     ctx.textAlign = "center";
     ctx.fillText(label, b.x, b.y + 7);
     ctx.globalAlpha = 1;
@@ -597,14 +728,20 @@ export function createGame(width: number, height: number): GameHandle | null {
         continue;
       }
       const alpha = Math.max(0, f.life / f.max);
+      const age = f.max - f.life;
+      const scale = age < 0.2 ? 1.3 - (age / 0.2) * 0.3 : 1;
       ctx.globalAlpha = alpha;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.scale(scale, scale);
       ctx.font = "bold 26px 'Microsoft YaHei', sans-serif";
       ctx.textAlign = "center";
       ctx.lineWidth = 4;
       ctx.strokeStyle = "rgba(18,20,28,0.8)";
-      ctx.strokeText(f.text, f.x, f.y);
+      ctx.strokeText(f.text, 0, 0);
       ctx.fillStyle = hex(f.color);
-      ctx.fillText(f.text, f.x, f.y);
+      ctx.fillText(f.text, 0, 0);
+      ctx.restore();
       ctx.globalAlpha = 1;
     }
   }
@@ -709,19 +846,26 @@ export function createGame(width: number, height: number): GameHandle | null {
     ctx.stroke();
 
     if (rank === 0) {
-      // 榜一专属：沿金环旋转的流光，带彗星式渐淡拖尾。
+      // 榜一专属：沿金环旋转的流光，加长加浓的彗星拖尾。
       const ang = now / 380;
-      const trail = 6;
+      const trail = 8;
       ctx.lineCap = "round";
       for (let t = trail; t >= 0; t -= 1) {
         const frac = t / trail; // 0 = 主弧，1 = 尾端
-        const start = ang - frac * Math.PI * 0.55;
-        const end = ang + Math.PI * 0.45 - frac * Math.PI * 0.18;
-        ctx.strokeStyle = `rgba(255,244,190,${0.9 * Math.pow(1 - frac, 1.3)})`;
-        ctx.lineWidth = 3 - 1.6 * frac;
+        const start = ang - frac * Math.PI * 0.95;
+        const end = ang + Math.PI * 0.45 - frac * Math.PI * 0.22;
+        const alpha = t === 0 ? 0.98 : 0.95 * Math.pow(1 - frac, 0.75);
+        const radius = r + 3 + frac * 2.2;
+        ctx.strokeStyle = t === 0 ? `rgba(255,252,235,${alpha})` : `rgba(255,236,170,${alpha})`;
+        ctx.lineWidth = 3.6 - 1.4 * frac;
+        if (t === 0) {
+          ctx.shadowColor = "rgba(255,215,94,0.9)";
+          ctx.shadowBlur = 8;
+        }
         ctx.beginPath();
-        ctx.arc(cx, cy, r + 3, start, end);
+        ctx.arc(cx, cy, radius, start, end);
         ctx.stroke();
+        ctx.shadowBlur = 0;
       }
       ctx.lineCap = "butt";
 
@@ -848,9 +992,9 @@ export function createGame(width: number, height: number): GameHandle | null {
 
   function drawLeaderboard(now: number) {
     const top = [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-    const panelW = 384;
-    const rowH = 50;
-    const headH = 92;
+    const panelW = 404;
+    const rowH = 60;
+    const headH = 100;
     const panelH = headH + top.length * rowH + 12;
     const px = width - panelW - 24;
     const py = 24;
@@ -877,17 +1021,17 @@ export function createGame(width: number, height: number): GameHandle | null {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#f0c020";
     ctx.beginPath();
-    ctx.arc(px + 28, py + 32, 6, 0, Math.PI * 2);
+    ctx.arc(px + 36, py + 34, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#f4f1ea";
     ctx.font = "bold 23px 'Microsoft YaHei', sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText("得分榜", px + 44, py + 32);
+    ctx.fillText("得分榜", px + 52, py + 34);
     ctx.strokeStyle = "rgba(240,192,32,0.3)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(px + 132, py + 32);
-    ctx.lineTo(px + panelW - 24, py + 32);
+    ctx.moveTo(px + 142, py + 34);
+    ctx.lineTo(px + panelW - 24, py + 34);
     ctx.stroke();
 
     const medal = ["#f0c020", "#c8ccd4", "#d08a4a"];
@@ -906,8 +1050,8 @@ export function createGame(width: number, height: number): GameHandle | null {
       }
 
       // 名次奖牌圆。
-      const mx = px + 32;
-      const mr = 16;
+      const mx = px + 36;
+      const mr = 17;
       const mg = ctx.createLinearGradient(mx - mr, ry - mr, mx + mr, ry + mr);
       if (isTop) {
         mg.addColorStop(0, medal[i]);
@@ -927,8 +1071,8 @@ export function createGame(width: number, height: number): GameHandle | null {
 
       // 头像大圆（取头像墙里同一观众），无头像用首字兜底。
       const av = wall.find((w) => w.name === name);
-      const ax = px + 76;
-      const ar = 20;
+      const ax = px + 88;
+      const ar = 21;
       ctx.strokeStyle = isTop ? medal[i] : "rgba(255,255,255,0.15)";
       ctx.lineWidth = 2;
       if (av?.img && av.loaded) {
@@ -964,20 +1108,20 @@ export function createGame(width: number, height: number): GameHandle | null {
       ctx.font = "19px 'Microsoft YaHei', sans-serif";
       ctx.fillStyle = i === 0 ? "#f4e6b0" : "#d8d4c8";
       const display = name.length > 10 ? `${name.slice(0, 10)}…` : name;
-      ctx.fillText(display, px + 110, ry + 1);
+      ctx.fillText(display, px + 126, ry + 1);
 
       // 分数：第一名金色发光。
       ctx.textAlign = "right";
       if (i === 0) {
         ctx.font = "bold 24px 'Microsoft YaHei', sans-serif";
         ctx.fillStyle = "rgba(240,192,32,0.35)";
-        ctx.fillText(`${score}`, px + panelW - 24, ry + 2);
+        ctx.fillText(`${score}`, px + panelW - 28, ry + 2);
         ctx.fillStyle = "#f0c020";
       } else {
         ctx.font = "bold 20px 'Microsoft YaHei', sans-serif";
         ctx.fillStyle = "#e8e4da";
       }
-      ctx.fillText(`${score}`, px + panelW - 26, ry + 1);
+      ctx.fillText(`${score}`, px + panelW - 28, ry + 1);
     });
     ctx.textBaseline = "alphabetic";
   }
@@ -1162,9 +1306,11 @@ export function createGame(width: number, height: number): GameHandle | null {
       for (let i = particles.length - 1; i >= 0; i -= 1) {
         const p = particles[i];
         p.life -= dt;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.vy += (p.kind === "leaf" ? 30 : 60) * dt;
+        if (p.kind !== "ring") {
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += (p.kind === "leaf" ? 30 : 60) * dt;
+        }
         if (p.spin) p.spin += p.spin * dt;
         if (p.life <= 0) {
           particles.splice(i, 1);
@@ -1180,6 +1326,17 @@ export function createGame(width: number, height: number): GameHandle | null {
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
           ctx.fill();
+        }
+        if (p.kind === "ring") {
+          const radius = p.size + (1 - fade) * p.vx;
+          ctx.globalAlpha = fade * 0.8;
+          ctx.strokeStyle = hex(p.color);
+          ctx.lineWidth = 2.5 * fade + 0.5;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          continue;
         }
         ctx.globalAlpha = fade;
         ctx.fillStyle = hex(p.color);
@@ -1204,7 +1361,7 @@ export function createGame(width: number, height: number): GameHandle | null {
           bubbles.splice(i, 1);
           continue;
         }
-        drawBubble(b);
+        drawBubble(b, now);
       }
 
       for (const node of wall) drawWallNode(node);
