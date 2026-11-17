@@ -119,8 +119,21 @@ overlay:
   recover_after_frames: 45
   recover_under_ms: 10
   mute: false
-  # 值为空表示不播放。把音频放到 apps/overlay/public/sfx/ 后写成 /overlay/sfx/礼物.mp3
+  # 值为空表示走前端内置合成音效；把音频放到 apps/overlay/public/sfx/ 后写成
+  # /overlay/sfx/xxx.mp3 即可用素材文件覆盖对应音色。
   sfx:
+    # 游戏内反馈
+    hit: ""
+    gold: ""
+    bomb: ""
+    gift: ""
+    miss: ""
+    # 观众互动
+    enter: ""
+    follow: ""
+    like: ""
+    danmaku: ""
+    # 后台场景/打印占位 cue
     gift_pop: ""
     print_cartoon: ""
     print_hologram: ""

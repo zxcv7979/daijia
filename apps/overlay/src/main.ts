@@ -1,6 +1,7 @@
 import "./style.css";
 import { createGame, type GameHandle, type FxPerformance } from "./game";
 import { applyLoad, stepQuality, type Quality, type QualityConfig } from "./quality";
+import { playSfx, ensureAudioContext } from "./sfx";
 
 type Envelope = {
   v: number;
@@ -93,10 +94,14 @@ async function pullConfig() {
 }
 
 function playCue(name: string) {
-  const url = config.sfx[name];
-  if (!url || muted) return;
-  const audio = new Audio(url);
-  audio.play().catch(() => undefined);
+  if (muted) return;
+  const file = config.sfx[name];
+  if (file) {
+    const audio = new Audio(file);
+    audio.play().catch(() => undefined);
+    return;
+  }
+  playSfx(name);
 }
 
 // 循环背景音乐：跟随全局静音，首次交互后解锁自动播放限制。
@@ -119,6 +124,7 @@ function applyBgm() {
 function unlockBgm() {
   if (bgmStarted) return;
   bgmStarted = true;
+  ensureAudioContext();
   applyBgm();
 }
 window.addEventListener("pointerdown", unlockBgm, { once: true });
@@ -188,6 +194,7 @@ function handle(msg: Envelope) {
     const text = event.text ?? "";
     if ((event.type === "danmaku" || event.type === "comment") && text) {
       game?.spawn(text, "danmaku", performanceFor("danmaku_float"), quality.level, config.max_particles, config.max_fx, event.avatar_url, name, event.type);
+      playCue("danmaku");
       return;
     }
 
@@ -198,6 +205,7 @@ function handle(msg: Envelope) {
 
     if (event.type === "enter" || event.type === "follow" || event.type === "like") {
       game?.spawn(name, "danmaku", performanceFor("danmaku_float"), quality.level, config.max_particles, config.max_fx, event.avatar_url, name, event.type);
+      playCue(event.type);
     }
     return;
   }
