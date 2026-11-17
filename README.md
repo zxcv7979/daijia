@@ -83,7 +83,8 @@ npm run dev:overlay    # http://127.0.0.1:5174/overlay/
 API 起来并且 `npm run build` 之后：
 
 - 管理控制台：<http://127.0.0.1:8787/admin/>
-- 特效预览：<http://127.0.0.1:8787/overlay/>
+- 特效页（OBS 透明源）：<http://127.0.0.1:8787/overlay/>
+- 特效页（浏览器里看，带深色底和帧率）：<http://127.0.0.1:8787/overlay/?preview=1&hud=1>
 - 说明页：<http://127.0.0.1:8787/>
 - OpenAPI：<http://127.0.0.1:8787/docs>
 
@@ -97,7 +98,9 @@ API 起来并且 `npm run build` 之后：
 - 创建一条虚拟打印任务，看进度走到完成。
 - 打开「真实采集」。这只会写 `data/audit/audit.jsonl`，官方适配器不会连接任何平台。
 
-特效页会跟着情绪变色，飘过弹幕，并显示虚拟打印进度。
+特效页是 1920×1080。OBS 里当浏览器源用，背景透明。普通浏览器请加 `?preview=1`，否则底是透明的。OBS 的宽度、高度、帧率和静音说明在 [docs/obs-browser-source.md](docs/obs-browser-source.md)。
+
+管理页调试台可以拖情绪强度、单步打一条点赞、拖 GSAP 时间轴，并看到特效页报上来的 FPS、帧时间和粒子数。音效默认不响。把文件放到 `apps/overlay/public/sfx/` 后，在 `config/default.yaml` 的 `overlay.sfx` 里写上 `/overlay/sfx/文件名`，再构建一次。`mute: true` 或调试台的「静音」会关掉它们。
 
 ## 剧本
 
@@ -129,6 +132,15 @@ python -m pytest -q
 覆盖：去重、连击合并、200ms 聚合（并确认 1.5 秒不会被当成 2 秒窗口）、打码、情绪曲线和压低、弹幕不抢主秀、打印里程碑、30 秒缓冲、非法 YAML、采集审计、200 条峰值零丢弃、三个剧本、L0–L4 和虚拟打印、WebSocket 补发。
 
 P2 另有：重连退避不超过 5 秒、按 `event_id` 的去重窗口、队列满时丢最旧并告警、真实源二次确认与审计、加密原文删除，以及 1000 条/秒模拟压测。
+
+P3 的画面降档、关键词映射和同时在场上限：
+
+```bash
+python -m pytest -q tests/test_quality.py
+python scripts/benchmark_overlay.py --seconds 12 --rate 20
+```
+
+无头浏览器的结果和 OBS 实机步骤在 [docs/p3-benchmark.md](docs/p3-benchmark.md)。真实 OBS 数字标成待实机验收。
 
 ```bash
 python scripts/load_test.py
@@ -221,8 +233,10 @@ SQLite 在 `data/live_show.db`，存打码后的事件、虚拟打印任务和�
 - [x] 重连退避不超过 5 秒，`event_id` 去重窗口，队列满时丢最旧并告警。`tests/test_governance.py`。
 - [x] 原文加密保存，列表接口不回明文，`DELETE /api/raw-payloads` 能删光。`test_encrypted_raw_roundtrip_and_delete`。
 - [x] 模拟源 1000 条/秒。见 [docs/p2-load-test.md](docs/p2-load-test.md)。入队到总线 p99 约 1.24 ms，峰值内存约 1.5 MB，按策略没有丢弃。
+- [x] 映射增加关键词，弹幕仍是氛围档，不抢走礼物主秀。同时在场特效不超过 8。连续超过 12ms 绘制预算会降档。`tests/test_quality.py`。
+- [x] 特效页是 1920×1080 透明浏览器源，Three.js 参数化头、Pixi 弹幕和粒子、GSAP 时间轴。无头 Chrome 在每秒 20 条事件下绘制耗时 p95 约 0.45ms。显示帧率和 OBS 实机见 [docs/p3-benchmark.md](docs/p3-benchmark.md)，标为待实机验收。
 
-本次 `python -m pytest -q`：**44 passed**。
+本次 `python -m pytest -q`：**49 passed**。
 
 没有实现非官方采集，也没有平台请求格式或签名算法。官方接入核对清单在 [docs/douyin-official-ingest-checklist.md](docs/douyin-official-ingest-checklist.md)。
 

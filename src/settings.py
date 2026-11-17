@@ -161,6 +161,22 @@ class PrintShowCfg(BaseModel):
         return value
 
 
+class OverlayCfg(BaseModel):
+    width: int = Field(default=1920, ge=16, le=7680)
+    height: int = Field(default=1080, ge=16, le=4320)
+    transparent: bool = True
+    target_fps: int = Field(default=60, ge=30, le=120)
+    frame_budget_ms: float = Field(default=12, gt=0, le=33)
+    max_fx: int = Field(default=8, ge=1, le=8)
+    max_particles: int = Field(default=20_000, ge=1, le=20_000)
+    downshift_after_frames: int = Field(default=8, ge=1, le=120)
+    recover_after_frames: int = Field(default=45, ge=1, le=600)
+    recover_under_ms: float = Field(default=10, gt=0, le=20)
+    mute: bool = False
+    # 特效名 → 本地音频路径。空字符串表示静音，不自动发声。
+    sfx: dict[str, str] = Field(default_factory=dict)
+
+
 class BusCfg(BaseModel):
     reconnect_buffer_sec: int = 30
 
@@ -182,6 +198,7 @@ class DefaultConfig(BaseModel):
     emotion: EmotionCfg
     print_show: PrintShowCfg
     bus: BusCfg = Field(default_factory=BusCfg)
+    overlay: OverlayCfg = Field(default_factory=OverlayCfg)
 
 
 class TriggerSpec(BaseModel):
@@ -190,6 +207,7 @@ class TriggerSpec(BaseModel):
     price_max: float | None = Field(default=None, ge=0)
     combo_min: int | None = Field(default=None, ge=1)
     highlight: str | None = None
+    keywords: list[str] = Field(default_factory=list)
     fx: str | None = None
 
 
@@ -208,6 +226,8 @@ class TierSpec(BaseModel):
     triggers: list[TriggerSpec] = Field(min_length=1)
     atmosphere_only: bool = False
     hold_ms: int | None = Field(default=None, ge=0, le=10_000)
+    particles: int = Field(default=24, ge=0, le=20_000)
+    secondary: bool = False
     print_spec: PrintSpec | None = Field(default=None, alias="print")
 
 

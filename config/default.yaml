@@ -87,3 +87,24 @@ print_show:
 
 bus:
   reconnect_buffer_sec: 30
+
+# OBS 浏览器源读这份配置，改完不用重新构建页面。
+overlay:
+  width: 1920
+  height: 1080
+  transparent: true
+  target_fps: 60
+  frame_budget_ms: 12
+  max_fx: 8
+  max_particles: 20000
+  downshift_after_frames: 8
+  recover_after_frames: 45
+  recover_under_ms: 10
+  mute: false
+  # 值为空表示不播放。把音频放到 apps/overlay/public/sfx/ 后写成 /overlay/sfx/礼物.mp3
+  sfx:
+    gift_pop: ""
+    print_cartoon: ""
+    print_hologram: ""
+    bangyi_rank1: ""
+    danmaku_float: ""

@@ -20,6 +20,8 @@ class Resolution:
     print_style: PrintStyle | None
     print_avatar: AvatarType | None
     fired: bool = True
+    particles: int = 24
+    secondary: bool = False
 
 
 class MappingTable:
@@ -67,6 +69,8 @@ class MappingTable:
             hold_ms=hold,
             print_style=print_style,
             print_avatar=print_avatar,
+            particles=tier.particles,
+            secondary=tier.secondary,
         )
 
 
@@ -81,7 +85,13 @@ def _score(trigger: TriggerSpec, event: LiveEvent, highlight: str | None) -> int
         return -1
     if trigger.combo_min is not None and event.combo_count < trigger.combo_min:
         return -1
+    if trigger.keywords:
+        text = event.text or ""
+        if not any(word and word in text for word in trigger.keywords):
+            return -1
     score = 1
+    if trigger.keywords:
+        score += 4
     if trigger.highlight:
         score += 10
     if trigger.price_min is not None:

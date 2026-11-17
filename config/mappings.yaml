@@ -7,6 +7,8 @@ tiers:
     emotion: ambient
     intensity: 0.18
     fx: sparkle_ambient
+    particles: 8
+    secondary: false
     hold_ms: 600
     triggers:
       - type: like
@@ -16,9 +18,14 @@ tiers:
     emotion: ambient
     intensity: 0.28
     fx: danmaku_float
+    particles: 16
+    secondary: true
     atmosphere_only: true
     hold_ms: 800
     triggers:
+      - type: danmaku
+        keywords: ["榜一"]
+        fx: danmaku_rank_hint
       - type: danmaku
       - type: comment
   L2:
@@ -26,6 +33,8 @@ tiers:
     emotion: joy
     intensity: 0.55
     fx: gift_pop
+    particles: 48
+    secondary: true
     hold_ms: 1400
     triggers:
       - type: follow
@@ -38,6 +47,8 @@ tiers:
     emotion: hype
     intensity: 0.78
     fx: print_cartoon
+    particles: 80
+    secondary: true
     hold_ms: 2200
     triggers:
       - type: gift
@@ -54,6 +65,8 @@ tiers:
     emotion: awe
     intensity: 0.96
     fx: print_hologram
+    particles: 120
+    secondary: true
     hold_ms: 2800
     triggers:
       # 榜一时刻：高档位分 + highlight=rank1，特效名单独区分，打印仍走全息。

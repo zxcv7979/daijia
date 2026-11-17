@@ -116,6 +116,26 @@ class EmotionEngine:
         fx = self._latest_fx()
         return {"emotion": self.snapshot(), "fx_cue": fx}
 
+    def force_emotion(self, name: EmotionName, intensity: float) -> dict[str, object]:
+        """调试台滑块：直接铺一层手动情绪，方便 OBS 预览。"""
+
+        self.cues.clear()
+        resolution = Resolution(
+            level="slider",
+            priority=9,
+            emotion=name,
+            intensity=max(0.0, min(1.0, intensity)),
+            fx="manual_slider",
+            atmosphere_only=False,
+            hold_ms=4000,
+            print_style=None,
+            print_avatar=None,
+            particles=36,
+            secondary=False,
+        )
+        self._activate(resolution, source_event="slider", bypass_cooldown=True)
+        return {"emotion": self.snapshot(), "fx_cue": self._latest_fx()}
+
     def on_print_progress(self, percent: int, job_id: str) -> Resolution | None:
         table = self.settings.default_model.print_show.cue_table
         cue_cfg = table.get(percent) or table.get(int(percent))
@@ -253,6 +273,9 @@ class EmotionEngine:
             ttl_ms=2000,
         )
         payload = dump_model(cue)
+        payload["particles"] = resolution.particles
+        payload["secondary"] = resolution.secondary
+        payload["print"] = resolution.print_style is not None
         self.bus.publish("fx_cue", payload)
         return payload
 

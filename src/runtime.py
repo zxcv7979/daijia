@@ -51,6 +51,21 @@ class Context:
         self._collection_was_on = False
         self._real_source_warned = False
         self._started = False
+        self.overlay_control: dict[str, object] = {
+            "mute": self.settings.default_model.overlay.mute,
+            "seek": None,
+        }
+        self.overlay_stats: dict[str, object] = {
+            "fps": 0,
+            "frame_ms": 0,
+            "particles": 0,
+            "fx": 0,
+            "downshifted": False,
+            "level": 0,
+            "heap": 0,
+            "renderer": "none",
+        }
+        self.overlay_heap: list[int] = []
 
     async def startup(self) -> None:
         if self.settings.collection_enabled():
@@ -226,6 +241,72 @@ class Context:
         raw_id = uuid.uuid4().hex
         self.store.save_raw(raw_id, adapter, self.clock.time(), token)
         return {"id": raw_id, "size": len(token)}
+
+    def overlay_public_config(self) -> dict[str, object]:
+        overlay = self.settings.default_model.overlay
+        performances: dict[str, object] = {}
+        for level, tier in self.settings.mappings_model.tiers.items():
+            spec = {
+                "level": level,
+                "emotion": tier.emotion.value,
+                "particles": tier.particles,
+                "secondary": tier.secondary,
+                "print": tier.print_spec.style.value if tier.print_spec else None,
+                "atmosphere_only": tier.atmosphere_only,
+            }
+            performances[tier.fx] = spec
+            for trigger in tier.triggers:
+                if trigger.fx:
+                    performances[trigger.fx] = spec
+        return {
+            "width": overlay.width,
+            "height": overlay.height,
+            "transparent": overlay.transparent,
+            "target_fps": overlay.target_fps,
+            "frame_budget_ms": overlay.frame_budget_ms,
+            "max_fx": overlay.max_fx,
+            "max_particles": overlay.max_particles,
+            "downshift_after_frames": overlay.downshift_after_frames,
+            "recover_after_frames": overlay.recover_after_frames,
+            "recover_under_ms": overlay.recover_under_ms,
+            "mute": bool(self.overlay_control.get("mute")),
+            "sfx": overlay.sfx,
+            "performances": performances,
+            "seek": self.overlay_control.get("seek"),
+        }
+
+    def update_overlay_control(
+        self,
+        *,
+        mute: bool | None = None,
+        seek: float | None = None,
+        clear_seek: bool = False,
+    ) -> dict[str, object]:
+        if mute is not None:
+            self.overlay_control["mute"] = mute
+        if clear_seek:
+            self.overlay_control["seek"] = None
+        elif seek is not None:
+            self.overlay_control["seek"] = max(0.0, min(1.0, seek))
+        return self.overlay_public_config()
+
+    def record_overlay_stats(self, stats: dict[str, object]) -> dict[str, object]:
+        self.overlay_stats = {
+            "fps": float(stats.get("fps") or 0),
+            "frame_ms": float(stats.get("frame_ms") or 0),
+            "particles": int(stats.get("particles") or 0),
+            "fx": int(stats.get("fx") or 0),
+            "downshifted": bool(stats.get("downshifted")),
+            "level": int(stats.get("level") or 0),
+            "heap": int(stats.get("heap") or 0),
+            "renderer": str(stats.get("renderer") or "none"),
+        }
+        heap = int(self.overlay_stats["heap"])
+        if heap:
+            self.overlay_heap.append(heap)
+            if len(self.overlay_heap) > 120:
+                self.overlay_heap = self.overlay_heap[-120:]
+        return self.overlay_stats
 
     def read_encrypted_raw(self, raw_id: str) -> bytes | None:
         blob = self.store.get_raw_blob(raw_id)

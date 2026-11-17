@@ -140,6 +140,28 @@ app.innerHTML = `
         <p class="muted">手动挡位只更新情绪并发送特效提示。虚拟打印用下面的按钮单独创建。</p>
       </div>
       <div class="panel">
+        <h2>调试台</h2>
+        <div class="row">
+          <select id="slider-emotion">
+            <option value="ambient">氛围</option>
+            <option value="joy">喜悦</option>
+            <option value="hype">热场</option>
+            <option value="awe">震撼</option>
+            <option value="tender">温柔</option>
+            <option value="alert">警示</option>
+          </select>
+          <input id="slider-intensity" type="range" min="0" max="100" value="60" />
+          <button id="apply-slider" type="button">应用情绪</button>
+          <button id="step" type="button">单步点赞</button>
+        </div>
+        <div class="row">
+          <label class="check">时间轴 <input id="seek" type="range" min="0" max="100" value="0" /></label>
+          <button id="seek-live" type="button">回到直播</button>
+          <label class="check"><input id="mute" type="checkbox" /> 静音</label>
+        </div>
+        <p id="overlay-stats" class="muted">等待特效页上报帧率</p>
+      </div>
+      <div class="panel">
         <h2>虚拟打印</h2>
         <div class="row">
           <select id="style">
@@ -513,5 +535,56 @@ must<HTMLInputElement>("collect").addEventListener("change", (ev) => {
     showPageError(error);
   });
 });
+
+must<HTMLButtonElement>("apply-slider").addEventListener("click", () => {
+  const emotion = must<HTMLSelectElement>("slider-emotion").value;
+  const intensity = Number(must<HTMLInputElement>("slider-intensity").value) / 100;
+  void api<{ emotion: Emotion }>("/api/debug/emotion", {
+    method: "POST",
+    body: JSON.stringify({ emotion, intensity }),
+  })
+    .then((body) => showEmotion(body.emotion))
+    .catch(showPageError);
+});
+
+must<HTMLButtonElement>("step").addEventListener("click", () => {
+  void api("/api/debug/step", { method: "POST" }).catch(showPageError);
+});
+
+must<HTMLInputElement>("seek").addEventListener("input", () => {
+  const seek = Number(must<HTMLInputElement>("seek").value) / 100;
+  void fetch("/api/overlay/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seek }),
+  }).catch(() => undefined);
+});
+
+must<HTMLButtonElement>("seek-live").addEventListener("click", () => {
+  void fetch("/api/overlay/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clear_seek: true }),
+  }).catch(() => undefined);
+});
+
+must<HTMLInputElement>("mute").addEventListener("change", (ev) => {
+  const mute = (ev.target as HTMLInputElement).checked;
+  void fetch("/api/overlay/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mute }),
+  }).catch(() => undefined);
+});
+
+window.setInterval(() => {
+  void fetch("/api/overlay/stats")
+    .then((response) => response.json())
+    .then((stats: { fps?: number; frame_ms?: number; particles?: number; fx?: number; downshifted?: boolean; renderer?: string }) => {
+      must<HTMLParagraphElement>("overlay-stats").textContent =
+        `FPS ${stats.fps ?? 0} · 帧时间 ${stats.frame_ms ?? 0} ms · 粒子 ${stats.particles ?? 0} · 在场特效 ${stats.fx ?? 0} · ${stats.downshifted ? "已降档" : "满质量"} · ${stats.renderer ?? "none"}`;
+    })
+    .catch(() => undefined);
+}, 1000);
 
 void boot().catch(showPageError);

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.adapters.sim_replay import SCENES
-from src.models import AvatarType, EventType, PrintStyle, dump_model
+from src.models import AvatarType, EmotionName, EventType, PrintStyle, dump_model
 from src.runtime import Context
 from src.settings import ConfigError
 
@@ -68,6 +68,28 @@ class RealSourceIn(BaseModel):
 class RawIn(BaseModel):
     adapter: str = "mock"
     payload: dict[str, object]
+
+
+class EmotionSliderIn(BaseModel):
+    emotion: EmotionName
+    intensity: float = Field(ge=0, le=1)
+
+
+class OverlayControlIn(BaseModel):
+    mute: bool | None = None
+    seek: float | None = Field(default=None, ge=0, le=1)
+    clear_seek: bool = False
+
+
+class OverlayStatsIn(BaseModel):
+    fps: float = 0
+    frame_ms: float = 0
+    particles: int = 0
+    fx: int = 0
+    downshifted: bool = False
+    level: int = 0
+    heap: int = 0
+    renderer: str = "none"
 
 
 class SimulateIn(BaseModel):
@@ -339,6 +361,51 @@ async def delete_raw_one(raw_id: str, request: Request) -> dict[str, object]:
     if deleted == 0:
         raise HTTPException(status_code=404, detail="找不到原文")
     return {"deleted": deleted}
+
+
+@router.get("/api/overlay/config")
+async def overlay_config(request: Request) -> dict[str, object]:
+    return _ctx(request).overlay_public_config()
+
+
+@router.post("/api/overlay/control")
+async def overlay_control(body: OverlayControlIn, request: Request) -> dict[str, object]:
+    return _ctx(request).update_overlay_control(mute=body.mute, seek=body.seek, clear_seek=body.clear_seek)
+
+
+@router.get("/api/overlay/stats")
+async def overlay_stats(request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    stats = dict(ctx.overlay_stats)
+    stats["heap_samples"] = list(ctx.overlay_heap)
+    return stats
+
+
+@router.post("/api/overlay/stats")
+async def post_overlay_stats(body: OverlayStatsIn, request: Request) -> dict[str, object]:
+    return _ctx(request).record_overlay_stats(body.model_dump())
+
+
+@router.post("/api/debug/emotion")
+async def debug_emotion(body: EmotionSliderIn, request: Request) -> dict[str, object]:
+    return _ctx(request).emotion.force_emotion(body.emotion, body.intensity)
+
+
+@router.post("/api/debug/step")
+async def debug_step(request: Request) -> dict[str, object]:
+    """单步触发一条模拟点赞，方便调试台逐帧看效果。"""
+
+    ctx = _ctx(request)
+    stamp = int(ctx.clock.time() * 1000)
+    return await ctx.ingest(
+        {
+            "adapter": "sim",
+            "source_msg_id": f"step-{stamp}",
+            "type": "like",
+            "user_id": f"step-{stamp}",
+            "nickname": "单步",
+        }
+    )
 
 
 @router.get("/api/audit")

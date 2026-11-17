@@ -1,4 +1,7 @@
 import "./style.css";
+import { createScene } from "./scene";
+import { createFx, type FxPerformance } from "./fx";
+import { stepQuality, type Quality, type QualityConfig } from "./quality";
 
 type Envelope = {
   v: number;
@@ -7,72 +10,99 @@ type Envelope = {
   data: Record<string, unknown>;
 };
 
-const EMOTION_LABEL: Record<string, string> = {
-  ambient: "氛围",
-  joy: "喜悦",
-  hype: "热场",
-  awe: "震撼",
-  tender: "温柔",
-  alert: "警示",
+type OverlayConfig = QualityConfig & {
+  width: number;
+  height: number;
+  transparent: boolean;
+  mute: boolean;
+  sfx: Record<string, string>;
+  performances: Record<string, FxPerformance & { emotion?: string; print?: string | null }>;
+  seek: number | null;
 };
 
-const EMOTION_GLOW: Record<string, string> = {
-  ambient: "rgba(126, 182, 255, 0.28)",
-  joy: "rgba(240, 162, 2, 0.38)",
-  hype: "rgba(255, 122, 69, 0.4)",
-  awe: "rgba(188, 154, 255, 0.42)",
-  tender: "rgba(255, 158, 181, 0.36)",
-  alert: "rgba(225, 90, 74, 0.4)",
-};
+const params = new URLSearchParams(location.search);
+document.body.classList.toggle("preview", params.has("preview"));
+document.body.classList.toggle("hud", params.has("hud"));
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("缺少根节点");
-
 app.innerHTML = `
-  <div class="stage" id="stage">
-    <div class="tag" id="tag">特效预览 · 演示 · 未连接平台</div>
-    <div class="orb" id="orb">
-      <strong id="name">氛围</strong>
-      <span id="meta">强度 0.00</span>
-    </div>
-    <div class="fx" id="fx"></div>
-    <div class="print">
-      <div class="track"><span id="bar"></span></div>
-      <p id="print-label">还没有虚拟打印任务</p>
-    </div>
+  <div id="stage">
+    <div id="hud">特效</div>
   </div>
 `;
+const stageNode = document.getElementById("stage");
+const hudNode = document.getElementById("hud");
+if (!stageNode || !hudNode) throw new Error("舞台未创建");
+const stage: HTMLElement = stageNode;
+const hud: HTMLElement = hudNode;
 
-const stage = must("stage");
-const orb = must("orb");
-const nameEl = must("name");
-const metaEl = must("meta");
-const fxEl = must("fx");
-const bar = must("bar");
-const printLabel = must("print-label");
-const tag = must("tag");
-let printStyle = "";
+const fallbackConfig: OverlayConfig = {
+  width: 1920,
+  height: 1080,
+  transparent: true,
+  frame_budget_ms: 12,
+  recover_under_ms: 10,
+  downshift_after_frames: 8,
+  recover_after_frames: 45,
+  max_fx: 8,
+  max_particles: 20000,
+  mute: false,
+  sfx: {},
+  performances: {},
+  seek: null,
+};
 
-function must(id: string): HTMLElement {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`缺少 #${id}`);
-  return node;
+let config = fallbackConfig;
+let quality: Quality = { level: 0, over: 0, under: 0, downshifted: false };
+let muted = false;
+let emotion = "ambient";
+let intensity = 0;
+let printProgress = 0;
+const scene = createScene(config.width, config.height);
+const fx = await createFx(config.width, config.height).catch(() => null);
+if (scene) {
+  scene.canvas.className = "layer";
+  stage.append(scene.canvas);
+}
+if (fx) {
+  fx.view.className = "layer";
+  stage.append(fx.view);
 }
 
-function fly(text: string) {
-  const node = document.createElement("div");
-  node.className = "fly";
-  node.textContent = text;
-  node.style.top = `${8 + Math.random() * 58}%`;
-  node.style.animationDuration = `${7 + Math.random() * 4}s`;
-  stage.append(node);
-  node.addEventListener("animationend", () => node.remove());
-  const flying = stage.querySelectorAll(".fly");
-  if (flying.length > 40) flying[0]?.remove();
+function fit() {
+  const scale = Math.min(window.innerWidth / config.width, window.innerHeight / config.height);
+  stage.style.transform = `scale(${scale || 1})`;
+}
+window.addEventListener("resize", fit);
+fit();
+
+async function pullConfig() {
+  try {
+    const response = await fetch("/api/overlay/config");
+    if (!response.ok) return;
+    config = { ...fallbackConfig, ...(await response.json()) };
+    muted = Boolean(config.mute);
+    if (typeof config.seek === "number" && scene) scene.timeline.progress(config.seek);
+    else if (scene && scene.timeline.paused()) scene.timeline.play();
+  } catch {
+    /* 配置接口暂时不可用时沿用上一份。 */
+  }
 }
 
+function playCue(name: string) {
+  const url = config.sfx[name];
+  if (!url || muted) return;
+  const audio = new Audio(url);
+  audio.play().catch(() => undefined);
+}
+
+function performanceFor(fxName: string): FxPerformance {
+  return config.performances[fxName] ?? { particles: 16, secondary: true };
+}
+
+let lastSeq = 0;
 function connect() {
-  let lastSeq = 0;
   let backoff = 500;
   const open = () => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -80,17 +110,13 @@ function connect() {
     const socket = new WebSocket(`${proto}://${location.host}/ws?since_seq=${since}`);
     socket.onopen = () => {
       backoff = 500;
-      tag.textContent = "特效预览 · 已连接 · 未连接平台";
     };
-    socket.onclose = () => {
-      tag.textContent = "特效预览 · 重连中";
-      window.setTimeout(open, backoff);
-      backoff = Math.min(backoff * 2, 5000);
-    };
+    socket.onclose = () => window.setTimeout(open, backoff);
     socket.onmessage = (ev) => {
       const msg = JSON.parse(String(ev.data)) as Envelope;
       if (typeof msg.seq === "number" && msg.seq > lastSeq) lastSeq = msg.seq;
       handle(msg);
+      backoff = 500;
     };
   };
   open();
@@ -98,32 +124,76 @@ function connect() {
 
 function handle(msg: Envelope) {
   if (msg.kind === "emotion") {
-    const emotion = String(msg.data.emotion ?? "ambient");
-    const intensity = Number(msg.data.intensity ?? 0);
-    nameEl.textContent = EMOTION_LABEL[emotion] ?? emotion;
-    metaEl.textContent = `强度 ${intensity.toFixed(2)} · 优先级 ${String(msg.data.priority ?? 0)} · ${msg.data.is_ducking ? "压低中" : "未压低"}`;
-    stage.style.setProperty("--glow", EMOTION_GLOW[emotion] ?? EMOTION_GLOW.ambient);
-    orb.style.setProperty("--scale", (0.82 + intensity * 0.35).toFixed(3));
+    emotion = String(msg.data.emotion ?? "ambient");
+    intensity = Number(msg.data.intensity ?? 0);
+    scene?.setEmotion(emotion, intensity);
   } else if (msg.kind === "event") {
-    const event = msg.data.event as { type?: string; text?: string; gift_name?: string; combo_count?: number; nickname_masked?: string } | undefined;
+    const event = msg.data.event as { type?: string; text?: string; gift_name?: string; nickname_masked?: string; combo_count?: number } | undefined;
     if (!event) return;
     if ((event.type === "danmaku" || event.type === "comment") && event.text) {
       const count = event.combo_count && event.combo_count > 1 ? ` ×${event.combo_count}` : "";
-      fly(`${event.text}${count}`);
-    } else if (event.type === "gift" || event.type === "combo") {
-      fxEl.textContent = `${event.nickname_masked ?? ""} ${event.gift_name ?? "礼物"} ×${event.combo_count ?? 1}`;
+      fx?.spawn(`${event.text}${count}`, "danmaku", performanceFor("danmaku_float"), quality.level, config.max_particles, config.max_fx);
     }
   } else if (msg.kind === "fx_cue") {
-    fxEl.textContent = `${String(msg.data.level ?? "")} · ${String(msg.data.fx ?? "")}`;
-  } else if (msg.kind === "print_job" || msg.kind === "print_progress") {
-    const progress = Number(msg.data.progress ?? 0);
-    const status = String(msg.data.status ?? "");
-    if (msg.data.style) printStyle = String(msg.data.style);
-    bar.style.width = `${progress}%`;
-    printLabel.textContent = `虚拟打印 ${printStyle} ${status} ${progress.toFixed(0)}%`.trim();
-  } else if (msg.kind === "buffer_gap") {
-    tag.textContent = "特效预览 · 已连接 · 超出 30 秒的事件已过期";
+    const name = String(msg.data.fx ?? "");
+    const performance = performanceFor(name);
+    performance.particles = Number(msg.data.particles ?? performance.particles);
+    performance.secondary = Boolean(msg.data.secondary ?? performance.secondary);
+    fx?.spawn(name, msg.data.print ? "gift" : "danmaku", performance, quality.level, config.max_particles, config.max_fx);
+    playCue(name);
+    if (scene && scene.timeline.progress() === 0) scene.timeline.play();
+  } else if (msg.kind === "print_progress" || msg.kind === "print_job") {
+    printProgress = Number(msg.data.progress ?? printProgress);
+    scene?.setPrint(printProgress);
   }
 }
 
+let last = performance.now();
+let fps = 0;
+let workMs = 0;
+let frames = 0;
+let fpsStamp = performance.now();
+
+function loop(now: number) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  frames += 1;
+  const workStart = performance.now();
+  scene?.setQuality(quality.level);
+  const stride = quality.level === 0 ? 1 : quality.level === 1 ? 2 : 3;
+  if (frames % stride === 0) scene?.tick(now / 1000);
+  fx?.tick(dt, quality.level);
+  const sample = performance.now() - workStart;
+  workMs = workMs * 0.85 + sample * 0.15;
+  quality = stepQuality(quality, sample, config);
+  if (now - fpsStamp >= 500) {
+    fps = Math.round((frames * 1000) / (now - fpsStamp));
+    frames = 0;
+    fpsStamp = now;
+    const heap = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0;
+    const counts = fx?.counts() ?? { particles: 0, fx: 0 };
+    const stats = {
+      fps,
+      frame_ms: Number(workMs.toFixed(2)),
+      particles: counts.particles,
+      fx: counts.fx,
+      downshifted: quality.downshifted,
+      level: quality.level,
+      heap,
+      renderer: scene ? "webgl" : fx ? "pixi" : "none",
+    };
+    (window as Window & { __overlayStats?: typeof stats }).__overlayStats = stats;
+    hud.textContent = `${stats.fps} fps · 绘制 ${stats.frame_ms} ms · 粒子 ${stats.particles} · 特效 ${stats.fx}${stats.downshifted ? " · 降档" : ""}`;
+    void fetch("/api/overlay/stats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(stats),
+    }).catch(() => undefined);
+  }
+  requestAnimationFrame(loop);
+}
+
+void pullConfig();
+window.setInterval(() => void pullConfig(), 1000);
 connect();
+requestAnimationFrame(loop);
