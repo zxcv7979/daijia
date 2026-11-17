@@ -39,6 +39,14 @@ type WallNode = {
   life: number;
   img: HTMLImageElement | null;
   loaded: boolean;
+  enterAt: number; // 进入可见窗口的时刻（用于淡入过渡）
+};
+
+type LeavingNode = {
+  node: WallNode;
+  x: number;
+  y: number;
+  bornAt: number;
 };
 
 type Bubble = {
@@ -56,6 +64,26 @@ type Bubble = {
 };
 
 type FloatScore = { x: number; y: number; text: string; life: number; max: number; color: number };
+
+type Flier = {
+  name: string;
+  avatarUrl: string | null;
+  img: HTMLImageElement | null;
+  loaded: boolean;
+  sx: number;
+  sy: number;
+  hx: number;
+  hy: number;
+  phase: "out" | "hold" | "back";
+  bornAt: number;
+  resolved: boolean;
+  onArrive: (() => void) | null;
+};
+
+const OUT_MS = 500;
+const HOLD_MS = 450;
+const BACK_MS = 450;
+const FLIER_SIZE = 56;
 
 type ComboState = { count: number; best: number };
 
@@ -86,7 +114,7 @@ export type GameHandle = {
     source?: string,
   ) => void;
   setMood: (emotion: string, intensity: number) => void;
-  handleCommand: (text: string, nickname: string | null, kind: string) => boolean;
+  handleCommand: (text: string, nickname: string | null, kind: string, avatarUrl?: string | null) => boolean;
   removeViewer: (name: string) => void;
   tick: (dt: number, level: number, now: number, hardCap?: number) => void;
   counts: () => { particles: number; fx: number; wall: number };
@@ -111,8 +139,16 @@ const MOLE_LIFE = 1600;
 const GOLD_LIFE = 1300;
 const BOMB_LIFE = 1200;
 
-const AVATAR_SIZE = 46;
-const WALL_MAX = 14;
+const AVATAR_SIZE = 56;
+const WALL_MAX = 24;
+const WALL_COLS = 24;
+const WALL_GAP = 79;
+const WALL_X0 = 48;
+const WALL_Y0 = 956;
+const ROSTER_MAX = 120; // 名册软上限：超出才淘汰最早进场者
+const ROTATE_SEC = 5; // 满员后每多少秒把一位排队观众轮换上屏
+const ENTER_MS = 350; // 新上屏头像淡入时长
+const LEAVE_MS = 450; // 离场头像淡出时长
 const ROUND_LENGTH = 300_000; // 一局时长（毫秒，5 分钟）
 const COMBO_STEP = 3; // 每 3 连击提一档倍率
 const MAX_MULT = 2; // 倍率封顶
@@ -154,10 +190,15 @@ export function createGame(width: number, height: number): GameHandle | null {
 
   const particles: Particle[] = [];
   const wall: WallNode[] = [];
+  let wallOffset = 0; // 名册当前展示窗口的起始下标
+  let wallClock = 0; // 轮换计时（秒）
+  const leaving: LeavingNode[] = []; // 正在淡出离场的头像
   const scores = new Map<string, number>();
   const bubbles: Bubble[] = [];
   const combos = new Map<string, ComboState>();
   const floats: FloatScore[] = [];
+  const fliers: Flier[] = [];
+  let currentNow = 0;
 
   let mood = "ambient";
   let intensity = 0.3;
@@ -199,7 +240,10 @@ export function createGame(width: number, height: number): GameHandle | null {
     scores.delete(name);
     combos.delete(name);
     const wi = wall.findIndex((w) => w.name === name);
-    if (wi >= 0) wall.splice(wi, 1);
+    if (wi >= 0) {
+      wall.splice(wi, 1);
+      wallOffset = Math.max(0, Math.min(wallOffset, wall.length - 1));
+    }
   }
 
   function comboOf(name: string): ComboState {
@@ -235,6 +279,151 @@ export function createGame(width: number, height: number): GameHandle | null {
     img.onload = () => avatarCache.set(url, img);
     img.src = url;
     return null;
+  }
+
+  /* ---------- 观众头像飞赴洞口 ---------- */
+
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+  const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+  function drawAvatarAt(
+    x: number, y: number, size: number,
+    img: HTMLImageElement | null, loaded: boolean, name: string, ringColor: number,
+  ) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.clip();
+    if (img && loaded) {
+      ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
+    } else {
+      ctx.fillStyle = "rgba(50,56,70,0.95)";
+      ctx.fillRect(x - size / 2, y - size / 2, size, size);
+      ctx.fillStyle = "#f4f1ea";
+      ctx.font = `bold ${Math.round(size * 0.42)}px 'Microsoft YaHei', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText((name || "?").slice(0, 1), x, y);
+      ctx.textBaseline = "alphabetic";
+    }
+    ctx.restore();
+    ctx.strokeStyle = hex(ringColor);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function wallPos(i: number): { x: number; y: number } {
+    return {
+      x: WALL_X0 + (i % WALL_COLS) * WALL_GAP,
+      y: WALL_Y0 - Math.floor(i / WALL_COLS) * WALL_GAP,
+    };
+  }
+
+  // 名册里某观众当前是否在展示窗口内；返回其座位索引，不可见返回 -1。
+  function visibleIndex(name: string): number {
+    const idx = wall.findIndex((w) => w.name === name);
+    if (idx < 0) return -1;
+    if (wall.length <= WALL_MAX) return idx;
+    const rel = (idx - wallOffset + wall.length) % wall.length;
+    return rel < WALL_MAX ? rel : -1;
+  }
+
+  function seatOf(name: string): { x: number; y: number } {
+    const vi = visibleIndex(name);
+    if (vi >= 0) {
+      const node = wall.find((w) => w.name === name);
+      if (node) return { x: node.anchorX, y: node.anchorY };
+    }
+    return { x: 120, y: 860 };
+  }
+
+  function launchFlier(name: string, avatarUrl: string | null, hole: Hole | null, onArrive: () => void) {
+    const seat = seatOf(name);
+    const node = wall.find((w) => w.name === name);
+    const target = hole ?? holes[Math.floor(Math.random() * holes.length)];
+    const img = node?.img ?? (avatarUrl ? loadAvatar(avatarUrl) : null);
+    fliers.push({
+      name,
+      avatarUrl,
+      img,
+      loaded: node ? node.loaded : Boolean(img),
+      sx: seat.x,
+      sy: seat.y,
+      hx: target.x,
+      hy: target.y - 24,
+      phase: "out",
+      bornAt: currentNow || performance.now(),
+      resolved: false,
+      onArrive,
+    });
+  }
+
+  function flierPos(f: Flier, now: number): { x: number; y: number; scale: number } {
+    const el = now - f.bornAt;
+    if (f.phase === "out") {
+      const t = Math.min(1, el / OUT_MS);
+      const e = easeOut(t);
+      const arc = 70 * Math.sin(Math.PI * t);
+      return { x: lerp(f.sx, f.hx, e), y: lerp(f.sy, f.hy, e) - arc, scale: 1 };
+    }
+    if (f.phase === "hold") {
+      const t = Math.min(1, el / HOLD_MS);
+      const bounce = Math.sin(t * Math.PI) * 6;
+      return { x: f.hx, y: f.hy + bounce, scale: 1.05 };
+    }
+    const t = Math.min(1, el / BACK_MS);
+    const e = easeInOut(t);
+    const arc = 60 * Math.sin(Math.PI * t);
+    return { x: lerp(f.hx, f.sx, e), y: lerp(f.hy, f.sy, e) - arc, scale: 1 };
+  }
+
+  function updateFliers(now: number) {
+    for (let i = fliers.length - 1; i >= 0; i -= 1) {
+      const f = fliers[i];
+      const el = now - f.bornAt;
+      if (f.phase === "out") {
+        if (el >= OUT_MS) {
+          f.phase = "hold";
+          f.bornAt = now;
+          if (!f.resolved) {
+            f.resolved = true;
+            f.onArrive?.();
+          }
+        }
+      } else if (f.phase === "hold") {
+        if (el >= HOLD_MS) {
+          f.phase = "back";
+          f.bornAt = now;
+        }
+      } else if (el >= BACK_MS) {
+        fliers.splice(i, 1);
+        continue;
+      }
+      if (f.phase !== "hold") {
+        const p = flierPos(f, now);
+        particles.push({
+          x: p.x, y: p.y, vx: 0, vy: -20, life: 0.5, max: 0.5,
+          size: 2.5, color: moodColor(), kind: "trail", spin: 0,
+        });
+      }
+    }
+  }
+
+  function drawFliers(now: number) {
+    for (const f of fliers) {
+      const { x, y, scale } = flierPos(f, now);
+      const size = FLIER_SIZE * scale;
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = hex(moodColor());
+      ctx.beginPath();
+      ctx.arc(x, y, size / 2 + 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      drawAvatarAt(x, y, size, f.img, f.loaded, f.name, moodColor());
+    }
   }
 
   function spawnMole(now: number, progress: number) {
@@ -412,7 +601,7 @@ export function createGame(width: number, height: number): GameHandle | null {
     return candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null;
   }
 
-  function handleCommand(text: string, nickname: string | null, kind: string): boolean {
+  function handleCommand(text: string, nickname: string | null, kind: string, avatarUrl: string | null = null): boolean {
     const name = nickname || "匿名观众";
     const t = text.trim();
 
@@ -451,29 +640,39 @@ export function createGame(width: number, height: number): GameHandle | null {
       const candidates = holes.filter(
         (h) => h.mole && !h.mole.hit && (wantGold ? h.mole!.kind === "gold" : h.mole!.kind === "normal"),
       );
-      if (candidates.length) {
-        return hitHole(candidates[Math.floor(Math.random() * candidates.length)], name);
-      }
-      registerMiss(name);
-      bubbles.push({ text: wantGold ? "金鼠还没露头" : "这会儿没有普通鼠", x: width / 2, y: 200, vx: 0, life: 1.2, max: 1.2, gift: false, name, roll: false });
-      return false;
+      const hole = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null;
+      const missText = wantGold ? "金鼠还没露头" : "这会儿没有普通鼠";
+      launchFlier(name, avatarUrl, hole, () => {
+        if (hole) {
+          hitHole(hole, name);
+        } else {
+          registerMiss(name);
+          bubbles.push({ text: missText, x: width / 2, y: 200, vx: 0, life: 1.2, max: 1.2, gift: false, name, roll: false });
+        }
+      });
+      return Boolean(hole);
     }
 
     const direct = t.match(/^#?打\s*([1-9])$/);
     if (direct) {
       const idx = Number(direct[1]) - 1;
-      if (holes[idx] && hitHole(holes[idx], name)) return true;
-      registerMiss(name);
-      return false;
+      const hole = holes[idx] ?? null;
+      launchFlier(name, avatarUrl, hole, () => {
+        if (hole && hitHole(hole, name)) return;
+        registerMiss(name);
+      });
+      return Boolean(hole && hole.mole && !hole.mole.hit);
     }
 
     const colMap: Record<string, number> = { 左: 0, 右: 2, 中: 1, 1: 0, 2: 1, 3: 2 };
     const colMatch = t.match(/^#?(左|右|中|1|2|3)$/);
     if (colMatch) {
       const hole = columnHole(colMap[colMatch[1]]);
-      if (hole && hitHole(hole, name)) return true;
-      registerMiss(name);
-      return false;
+      launchFlier(name, avatarUrl, hole, () => {
+        if (hole && hitHole(hole, name)) return;
+        registerMiss(name);
+      });
+      return Boolean(hole);
     }
     return false;
   }
@@ -782,12 +981,12 @@ export function createGame(width: number, height: number): GameHandle | null {
       ["小心炸弹", "踩中 −15", "#e15a4a"],
       ["送礼", "自动加分砸鼠", "#ff9eb5"],
     ];
-    const panelW = 300;
-    const lineH = 36;
-    const headH = 56;
-    const panelH = headH + lines.length * lineH + 12;
+    const panelW = 404;
+    const lineH = 46;
+    const headH = 68;
+    const panelH = headH + lines.length * lineH + 14;
     const px = 24;
-    const py = 120;
+    const py = 24;
 
     // 玻璃渐变底 + 金边高光，与榜单统一风格。
     const bg = ctx.createLinearGradient(px, py, px, py + panelH);
@@ -806,21 +1005,21 @@ export function createGame(width: number, height: number): GameHandle | null {
     ctx.roundRect(px + 1, py + 1, panelW - 2, panelH - 2, 19);
     ctx.stroke();
 
-    // 标题：奖杯点 + 文案 + 装饰线。
+    // 标题：奖杯点 + 文案 + 装饰线（与得分榜同一套规范）。
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#f0c020";
     ctx.beginPath();
-    ctx.arc(px + 26, py + 29, 5, 0, Math.PI * 2);
+    ctx.arc(px + 36, py + 34, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#f4f1ea";
-    ctx.font = "bold 22px 'Microsoft YaHei', sans-serif";
+    ctx.font = "bold 23px 'Microsoft YaHei', sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText("玩法说明", px + 40, py + 29);
+    ctx.fillText("玩法说明", px + 52, py + 34);
     ctx.strokeStyle = "rgba(240,192,32,0.3)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(px + 124, py + 29);
-    ctx.lineTo(px + panelW - 24, py + 29);
+    ctx.moveTo(px + 142, py + 34);
+    ctx.lineTo(px + panelW - 24, py + 34);
     ctx.stroke();
 
     lines.forEach(([cmd, desc, color], i) => {
@@ -832,19 +1031,19 @@ export function createGame(width: number, height: number): GameHandle | null {
         ctx.lineTo(px + panelW - 20, ry - lineH / 2);
         ctx.stroke();
       }
-      // 类型色点。
+      // 类型色点（对齐榜单奖牌列）。
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(px + 26, ry, 4, 0, Math.PI * 2);
+      ctx.arc(px + 36, ry, 5, 0, Math.PI * 2);
       ctx.fill();
       // 命令（金色加粗）与描述分栏对齐。
-      ctx.font = "bold 18px 'Microsoft YaHei', sans-serif";
+      ctx.font = "bold 22px 'Microsoft YaHei', sans-serif";
       ctx.fillStyle = color;
       ctx.textAlign = "left";
-      ctx.fillText(cmd, px + 38, ry + 1);
-      ctx.font = "17px 'Microsoft YaHei', sans-serif";
+      ctx.fillText(cmd, px + 52, ry + 1);
+      ctx.font = "21px 'Microsoft YaHei', sans-serif";
       ctx.fillStyle = "#d8d4c8";
-      ctx.fillText(desc, px + 150, ry + 1);
+      ctx.fillText(desc, px + 196, ry + 1);
     });
     ctx.textBaseline = "alphabetic";
   }
@@ -1153,12 +1352,26 @@ export function createGame(width: number, height: number): GameHandle | null {
     ctx.textBaseline = "alphabetic";
   }
 
-  function drawWallNode(node: WallNode) {
+  function drawWallNode(node: WallNode, i: number, now: number) {
+    const pos = wallPos(i);
+    node.anchorX = pos.x;
+    node.anchorY = pos.y;
     const fade = Math.min(1, node.life / 2);
-    const bob = Math.sin(node.phase) * 5;
-    const x = node.anchorX;
-    const y = node.anchorY + bob;
-    ctx.globalAlpha = fade;
+    // 进场淡入：easeOut 上滑 + 放大。
+    const enter = node.enterAt ? Math.min(1, Math.max(0, (now - node.enterAt) / ENTER_MS)) : 1;
+    const ease = 1 - Math.pow(1 - enter, 3);
+    const enterScale = 0.8 + 0.2 * ease;
+    const enterRise = (1 - ease) * 10;
+    // 蠢蠢欲动：各自相位的轻弹、微摆、鼓胀呼吸与俏皮倾斜。
+    const t = now / 1000;
+    const p = node.phase;
+    const dx = Math.cos(t * 1.7 + p) * 2.5;
+    const dy = Math.sin(t * 2.2 + p) * 4;
+    const s = 1 + 0.05 * Math.sin(t * 3.1 + p * 1.3);
+    const tilt = Math.sin(t * 1.3 + p) * 0.06;
+    const x = pos.x + dx;
+    const y = pos.y + dy + enterRise;
+    ctx.globalAlpha = fade * ease;
 
     // 光环底。
     const ring = ctx.createRadialGradient(x, y, AVATAR_SIZE / 3, x, y, AVATAR_SIZE / 2 + 8);
@@ -1169,31 +1382,13 @@ export function createGame(width: number, height: number): GameHandle | null {
     ctx.arc(x, y, AVATAR_SIZE / 2 + 8, 0, Math.PI * 2);
     ctx.fill();
 
-    // 圆形裁切头像。
+    // 圆形裁切头像 + 描边，带轻微姿态变换。
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(x, y, AVATAR_SIZE / 2, 0, Math.PI * 2);
-    ctx.clip();
-    if (node.img && node.loaded) {
-      ctx.drawImage(node.img, x - AVATAR_SIZE / 2, y - AVATAR_SIZE / 2, AVATAR_SIZE, AVATAR_SIZE);
-    } else {
-      ctx.fillStyle = "rgba(50,56,70,0.95)";
-      ctx.fillRect(x - AVATAR_SIZE / 2, y - AVATAR_SIZE / 2, AVATAR_SIZE, AVATAR_SIZE);
-      ctx.fillStyle = "#f4f1ea";
-      ctx.font = "bold 20px 'Microsoft YaHei', sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText((node.name || "?").slice(0, 1), x, y);
-      ctx.textBaseline = "alphabetic";
-    }
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+    ctx.scale(s * enterScale, s * enterScale);
+    drawAvatarAt(0, 0, AVATAR_SIZE, node.img, node.loaded, node.name, moodColor());
     ctx.restore();
-
-    // 描边。
-    ctx.strokeStyle = hex(moodColor());
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, AVATAR_SIZE / 2, 0, Math.PI * 2);
-    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
@@ -1227,17 +1422,26 @@ export function createGame(width: number, height: number): GameHandle | null {
           existing.avatarUrl = avatar ?? existing.avatarUrl;
         } else {
           const img = avatar ? loadAvatar(avatar) : null;
+          const pos = wallPos(Math.min(wall.length, WALL_MAX - 1));
           wall.push({
             avatarUrl: avatar,
             name,
-            anchorX: 96 + (wall.length % 7) * 76,
-            anchorY: 930 - Math.floor(wall.length / 7) * 76,
+            anchorX: pos.x,
+            anchorY: pos.y,
             phase: Math.random() * Math.PI * 2,
             life: 14,
             img,
             loaded: Boolean(img),
+            enterAt: currentNow || 0,
           });
-          if (wall.length > WALL_MAX) wall.shift();
+          // 名册软上限：超出才淘汰最早进场者。
+          if (wall.length > ROSTER_MAX) {
+            wall.shift();
+            wallOffset = Math.max(0, Math.min(wallOffset, wall.length - 1));
+          }
+          // 新观众优先上屏：窗口回卷到以最新成员为末位，并重置轮换计时。
+          if (wall.length > WALL_MAX) wallOffset = wall.length - WALL_MAX;
+          wallClock = 0;
         }
       }
 
@@ -1261,7 +1465,7 @@ export function createGame(width: number, height: number): GameHandle | null {
         return;
       }
 
-      const acted = handleCommand(text, name, kind);
+      const acted = handleCommand(text, name, kind, avatar);
       if (!acted && text) {
         pushBubble({
           text,
@@ -1280,6 +1484,8 @@ export function createGame(width: number, height: number): GameHandle | null {
       void fxCap;
     },
     tick(dt, level, now, hardCapLimit = 2000) {
+      currentNow = now;
+      // 一局计时：到点自动重开，清空命中统计与连击，累计榜单保留。
       // 一局计时：到点自动重开，清空命中统计与连击，累计榜单保留。
       if (!roundEndAt) {
         roundStart = now;
@@ -1300,6 +1506,26 @@ export function createGame(width: number, height: number): GameHandle | null {
         nextSpawnAt = now + interval * (0.7 + Math.random() * 0.6);
       }
       flash = Math.max(0, flash - dt * 2);
+
+      // 座位墙轮换：满员后定时把一位排队观众轮换上屏。
+      if (wall.length > WALL_MAX) {
+        wallClock += dt;
+        if (wallClock >= ROTATE_SEC) {
+          const len = wall.length;
+          // 被移出窗口的头像进入淡出过渡；新补位头像重置淡入时刻。
+          const outNode = wall[wallOffset % len];
+          if (outNode) {
+            const outPos = wallPos(0);
+            leaving.push({ node: outNode, x: outPos.x, y: outPos.y, bornAt: now });
+          }
+          wallOffset = (wallOffset + 1) % len;
+          const inNode = wall[(wallOffset + WALL_MAX - 1) % len];
+          if (inNode) inNode.enterAt = now;
+          wallClock = 0;
+        }
+      } else {
+        wallClock = 0;
+      }
 
       ctx.clearRect(0, 0, width, height);
       drawBackground(now);
@@ -1386,7 +1612,33 @@ export function createGame(width: number, height: number): GameHandle | null {
         drawBubble(b, now);
       }
 
-      for (const node of wall) drawWallNode(node);
+      updateFliers(now);
+      const flying = new Set(fliers.map((f) => f.name));
+      const visibleCount = Math.min(WALL_MAX, wall.length);
+      for (let k = 0; k < visibleCount; k += 1) {
+        const node = wall[(wallOffset + k) % wall.length];
+        if (!flying.has(node.name)) drawWallNode(node, k, now);
+      }
+
+      // 离场头像：淡出 + 缩小 + 下滑，结束后清理。
+      for (let i = leaving.length - 1; i >= 0; i -= 1) {
+        const L = leaving[i];
+        const lt = Math.min(1, (now - L.bornAt) / LEAVE_MS);
+        if (lt >= 1) {
+          leaving.splice(i, 1);
+          continue;
+        }
+        const scale = 1 - 0.25 * lt;
+        const ly = L.y + lt * 12;
+        ctx.globalAlpha = 1 - lt;
+        ctx.save();
+        ctx.translate(L.x, ly);
+        ctx.scale(scale, scale);
+        drawAvatarAt(0, 0, AVATAR_SIZE, L.node.img, L.node.loaded, L.node.name, moodColor());
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+      drawFliers(now);
       drawLeaderboard(now);
       drawHelp();
       drawFloats(dt);
