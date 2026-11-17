@@ -122,6 +122,30 @@ function connect() {
   open();
 }
 
+async function pullAvatar() {
+  if (!scene) return;
+  try {
+    const list = await fetch("/api/avatars").then((response) => response.json());
+    const active = (list.assets as Array<{ avatar_id: string; file?: string; glb_rel?: string }> | undefined)?.find(
+      (item) => item.avatar_id === list.active,
+    );
+    const rel = active?.file || active?.glb_rel;
+    if (rel) {
+      const url = `/avatar-files/${rel}`;
+      if (url !== (window as Window & { __avatarUrl?: string }).__avatarUrl) {
+        (window as Window & { __avatarUrl?: string }).__avatarUrl = url;
+        await scene.showAvatar(url);
+      }
+    }
+    const weights = await fetch(`/api/avatars/blendshapes?emotion=${encodeURIComponent(emotion)}&intensity=${intensity}`).then((response) =>
+      response.json(),
+    );
+    scene.setBlend(weights.weights ?? {});
+  } catch {
+    /* 角色库还没就绪时继续用场景里的参数化头。 */
+  }
+}
+
 function handle(msg: Envelope) {
   if (msg.kind === "emotion") {
     emotion = String(msg.data.emotion ?? "ambient");
@@ -131,6 +155,7 @@ function handle(msg: Envelope) {
     const event = msg.data.event as { type?: string; text?: string; gift_name?: string; nickname_masked?: string; combo_count?: number } | undefined;
     if (!event) return;
     if ((event.type === "danmaku" || event.type === "comment") && event.text) {
+      scene?.setLip(Math.min(1, event.text.length / 12));
       const count = event.combo_count && event.combo_count > 1 ? ` ×${event.combo_count}` : "";
       fx?.spawn(`${event.text}${count}`, "danmaku", performanceFor("danmaku_float"), quality.level, config.max_particles, config.max_fx);
     }
@@ -194,6 +219,10 @@ function loop(now: number) {
 }
 
 void pullConfig();
-window.setInterval(() => void pullConfig(), 1000);
+void pullAvatar();
+window.setInterval(() => {
+  void pullConfig();
+  void pullAvatar();
+}, 1000);
 connect();
 requestAnimationFrame(loop);

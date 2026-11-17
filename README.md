@@ -236,7 +236,9 @@ SQLite 在 `data/live_show.db`，存打码后的事件、虚拟打印任务和�
 - [x] 映射增加关键词，弹幕仍是氛围档，不抢走礼物主秀。同时在场特效不超过 8。连续超过 12ms 绘制预算会降档。`tests/test_quality.py`。
 - [x] 特效页是 1920×1080 透明浏览器源，Three.js 参数化头、Pixi 弹幕和粒子、GSAP 时间轴。无头 Chrome 在每秒 20 条事件下绘制耗时 p95 约 0.45ms。显示帧率和 OBS 实机见 [docs/p3-benchmark.md](docs/p3-benchmark.md)，标为待实机验收。
 
-本次 `python -m pytest -q`：**49 passed**。
+本次 `python -m pytest -q`：**56 passed**。
+
+预设角色圆圆、青青、禾禾在 `data/avatars/presets/`，说明见 [docs/avatars.md](docs/avatars.md)。照片任务要先同意；没有 NVIDIA GPU 时生成参数化头，GPU 在 60 秒内出 GLB 标成待实机验收。切换角色会交叉淡入，新文件没好就留着上一帧。
 
 没有实现非官方采集，也没有平台请求格式或签名算法。官方接入核对清单在 [docs/douyin-official-ingest-checklist.md](docs/douyin-official-ingest-checklist.md)。
 

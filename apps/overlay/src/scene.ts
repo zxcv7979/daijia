@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import gsap from "gsap";
 
 export type ShowRig = {
@@ -12,6 +13,9 @@ export type SceneHandle = {
   rig: ShowRig;
   timeline: gsap.core.Timeline;
   setEmotion: (emotion: string, intensity: number) => void;
+  setBlend: (weights: Record<string, number>) => void;
+  setLip: (amount: number) => void;
+  showAvatar: (url: string) => Promise<{ ok: boolean; loadMs: number; kept: boolean }>;
   setPrint: (progress: number) => void;
   setQuality: (level: number) => void;
   tick: (time: number) => void;
@@ -116,6 +120,40 @@ export function createScene(width: number, height: number): SceneHandle | null {
   let printProgress = 0;
   let qualityLevel = 0;
   let pixelScale = 1;
+  let lip = 0;
+  let blend: Record<string, number> = {};
+  let shown: THREE.Object3D = avatar;
+  const cache = new Map<string, Promise<THREE.Group>>();
+  let switchToken = 0;
+
+  function opacityOf(root: THREE.Object3D, value: number) {
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) {
+        material.transparent = true;
+        material.opacity = value;
+      }
+    });
+  }
+
+  function applyBlend(root: THREE.Object3D, blink: number) {
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.morphTargetDictionary || !mesh.morphTargetInfluences) return;
+      for (const [name, value] of Object.entries(blend)) {
+        const index = mesh.morphTargetDictionary[name];
+        if (index !== undefined) mesh.morphTargetInfluences[index] = value;
+      }
+      const left = mesh.morphTargetDictionary.eyeBlinkLeft;
+      const right = mesh.morphTargetDictionary.eyeBlinkRight;
+      const jaw = mesh.morphTargetDictionary.jawOpen;
+      if (left !== undefined) mesh.morphTargetInfluences[left] = Math.max(mesh.morphTargetInfluences[left] ?? 0, blink);
+      if (right !== undefined) mesh.morphTargetInfluences[right] = Math.max(mesh.morphTargetInfluences[right] ?? 0, blink);
+      if (jaw !== undefined) mesh.morphTargetInfluences[jaw] = Math.max(mesh.morphTargetInfluences[jaw] ?? 0, lip);
+    });
+  }
 
   return {
     canvas,
@@ -124,6 +162,60 @@ export function createScene(width: number, height: number): SceneHandle | null {
     setEmotion(next, value) {
       emotion = next;
       intensity = value;
+    },
+    setBlend(weights) {
+      blend = weights;
+    },
+    setLip(amount) {
+      lip = Math.max(0, Math.min(1, amount));
+    },
+    async showAvatar(url: string) {
+      const token = ++switchToken;
+      const started = performance.now();
+      let pending = cache.get(url);
+      if (!pending) {
+        pending = new Promise((resolve, reject) => {
+          new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+        });
+        cache.set(url, pending);
+      }
+      let template: THREE.Group;
+      try {
+        template = await pending;
+      } catch {
+        cache.delete(url);
+        return { ok: false, loadMs: performance.now() - started, kept: true };
+      }
+      if (token !== switchToken) return { ok: false, loadMs: performance.now() - started, kept: true };
+      const next = template.clone(true);
+      next.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map((item) => item.clone()) : mesh.material.clone();
+      });
+      opacityOf(next, 0);
+      scene.add(next);
+      const previous = shown;
+      shown = next;
+      gsap.to({ value: 0 }, { value: 1, duration: 0.35, onUpdate() { opacityOf(next, this.targets()[0].value); } });
+      if (previous && previous !== next) {
+        gsap.to(
+          { value: 1 },
+          {
+            value: 0,
+            duration: 0.35,
+            onUpdate() { opacityOf(previous, this.targets()[0].value); },
+            onComplete() { scene.remove(previous); },
+          },
+        );
+      }
+      const loadMs = performance.now() - started;
+      (window as Window & { __avatarState?: { url: string; loadMs: number; ok: boolean } }).__avatarState = {
+        url,
+        loadMs,
+        ok: true,
+      };
+      return { ok: true, loadMs, kept: false };
     },
     setPrint(progress) {
       printProgress = progress;
@@ -143,16 +235,18 @@ export function createScene(width: number, height: number): SceneHandle | null {
       renderer.setSize(nextWidth, nextHeight, false);
     },
     tick(time) {
-      const blink = Math.sin(time * 0.7) > 0.97 ? 0.12 : 1;
-      leftEye.scale.y = blink;
-      rightEye.scale.y = blink;
+      const blink = Math.sin(time * 0.7) > 0.97 ? 1 : 0;
+      leftEye.scale.y = blink ? 0.12 : 1;
+      rightEye.scale.y = leftEye.scale.y;
       const breathe = 1 + Math.sin(time * 1.4) * 0.02;
       body.scale.y = breathe;
-      avatar.rotation.y = Math.sin(time * 0.35) * rig.sway;
-      avatar.rotation.z = Math.sin(time * 0.2) * 0.02;
-      avatar.position.y = Math.sin(time * 1.4) * 0.03;
+      shown.rotation.y = Math.sin(time * 0.35) * rig.sway;
+      shown.rotation.z = Math.sin(time * 0.2) * 0.02;
+      shown.position.y = Math.sin(time * 1.4) * 0.03;
+      applyBlend(shown, blink);
+      lip = Math.max(0, lip - 0.02);
       const jawOpen = emotion === "awe" || emotion === "hype" ? 0.35 + intensity * 0.5 : intensity * 0.25;
-      if (head.morphTargetInfluences) head.morphTargetInfluences[0] = jawOpen;
+      if (head.morphTargetInfluences) head.morphTargetInfluences[0] = Math.max(jawOpen, lip);
       brow.position.y = 0.28 + (emotion === "alert" ? 0.04 : intensity * 0.03);
       browR.position.y = brow.position.y;
       const tint = new THREE.Color(EMOTION_COLOR[emotion] ?? EMOTION_COLOR.ambient);

@@ -20,6 +20,12 @@ def project(tmp_path: Path) -> Path:
     samples.mkdir(parents=True)
     for sample in (ROOT / "data" / "samples").glob("*.jsonl"):
         (samples / sample.name).write_text(sample.read_text(encoding="utf-8"), encoding="utf-8")
+    presets = ROOT / "data" / "avatars" / "presets"
+    if presets.is_dir():
+        target = tmp_path / "data" / "avatars" / "presets"
+        target.mkdir(parents=True)
+        for glb in presets.glob("*.glb"):
+            (target / glb.name).write_bytes(glb.read_bytes())
     return tmp_path
 
 

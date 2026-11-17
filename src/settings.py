@@ -161,6 +161,21 @@ class PrintShowCfg(BaseModel):
         return value
 
 
+class AvatarCfg(BaseModel):
+    photo_retention_days: int = Field(default=7, ge=1, le=3650)
+    seed: int = Field(default=42, ge=0, le=2_000_000_000)
+    gpu_enabled: bool = False
+    # 云端重建接口默认关闭，本仓库也不调用它。
+    cloud_api: bool = False
+
+    @field_validator("cloud_api")
+    @classmethod
+    def _cloud_off(cls, value: bool) -> bool:
+        if value:
+            raise ValueError("照片不能发到云端接口，cloud_api 必须为 false")
+        return value
+
+
 class OverlayCfg(BaseModel):
     width: int = Field(default=1920, ge=16, le=7680)
     height: int = Field(default=1080, ge=16, le=4320)
@@ -199,6 +214,7 @@ class DefaultConfig(BaseModel):
     print_show: PrintShowCfg
     bus: BusCfg = Field(default_factory=BusCfg)
     overlay: OverlayCfg = Field(default_factory=OverlayCfg)
+    avatar: AvatarCfg = Field(default_factory=AvatarCfg)
 
 
 class TriggerSpec(BaseModel):

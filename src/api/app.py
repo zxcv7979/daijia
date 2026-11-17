@@ -61,6 +61,9 @@ def create_app(root: Path | None = None) -> FastAPI:
     async def favicon() -> Response:
         return Response(status_code=204)
 
+    avatar_root = project_root / "data" / "avatars"
+    avatar_root.mkdir(parents=True, exist_ok=True)
+    app.mount("/avatar-files", StaticFiles(directory=str(avatar_root)), name="avatar-files")
     _mount_frontend(app, project_root, "admin", "管理控制台")
     _mount_frontend(app, project_root, "overlay", "特效预览")
     return app

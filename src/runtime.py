@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from src.adapters.crypto import decrypt, derive_key, encrypt
 from src.adapters.registry import AdapterRegistry
+from src.avatar.jobs import AvatarError, AvatarLibrary
 from src.adapters.sim_replay import SimReplay
 from src.audit.log import AuditLog
 from src.bus.event_bus import EventBus
@@ -66,6 +67,15 @@ class Context:
             "renderer": "none",
         }
         self.overlay_heap: list[int] = []
+        avatar_cfg = self.settings.default_model.avatar
+        self.avatars = AvatarLibrary(
+            root,
+            self.store,
+            self.settings.salt,
+            retention_days=avatar_cfg.photo_retention_days,
+            seed=avatar_cfg.seed,
+        )
+        self.active_avatar_id = "preset-yuan"
 
     async def startup(self) -> None:
         if self.settings.collection_enabled():

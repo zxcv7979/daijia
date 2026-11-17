@@ -86,6 +86,20 @@ app.innerHTML = `
         <div id="scenes" class="row"></div>
       </div>
       <div class="panel">
+        <h2>角色</h2>
+        <div id="avatars" class="row"></div>
+        <label class="check"><input id="consent" type="checkbox" /> 已获得本人同意</label>
+        <label class="check"><input id="minor" type="checkbox" /> 未成年人或敏感主体（将拒绝）</label>
+        <input id="photos" type="file" accept="image/*" multiple />
+        <div class="row">
+          <button id="upload-avatar" type="button">提交照片</button>
+          <button id="approve-avatar" type="button">通过复核</button>
+          <button id="regen-avatar" type="button">重做</button>
+          <button id="delete-avatar" type="button">删除照片和成品</button>
+        </div>
+        <p id="avatar-note" class="muted"></p>
+      </div>
+      <div class="panel">
         <h2>合规</h2>
         <label class="check">
           <input id="collect" type="checkbox" />
@@ -338,6 +352,34 @@ async function refreshJobs() {
   }
 }
 
+let currentJob = "";
+let currentAvatar = "";
+
+async function refreshAvatars() {
+  const body = await api<{ active: string; assets: Array<{ avatar_id: string; name: string; kind: string }> }>("/api/avatars");
+  const box = must<HTMLDivElement>("avatars");
+  box.replaceChildren();
+  for (const asset of body.assets) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = asset.avatar_id === body.active ? `${asset.name} · 使用中` : asset.name;
+    button.addEventListener("click", () => {
+      const form = new FormData();
+      form.set("avatar_id", asset.avatar_id);
+      void fetch("/api/avatars/active", { method: "POST", body: form })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "切换失败");
+          currentAvatar = asset.avatar_id;
+          must<HTMLParagraphElement>("avatar-note").textContent = `已切换 ${asset.name}，画面交叉淡入`;
+          await refreshAvatars();
+        })
+        .catch(showPageError);
+    });
+    box.append(button);
+  }
+}
+
 async function refreshAudit() {
   const rows = await api<Array<{ action: string; detail: { note?: string } }>>("/api/audit?limit=8");
   must<HTMLDivElement>("audit").textContent = rows.length
@@ -376,7 +418,7 @@ async function boot() {
     });
     sceneBox.append(button);
   }
-  await Promise.all([loadYaml(), refreshReplay(), refreshJobs(), refreshAudit()]);
+  await Promise.all([loadYaml(), refreshReplay(), refreshJobs(), refreshAudit(), refreshAvatars()]);
   connect();
   window.setInterval(() => {
     void api<{ dropped: number; latency_ms: { p50: number | null; p99: number | null } }>("/api/metrics")
@@ -517,6 +559,71 @@ must<HTMLButtonElement>("delete-raw").addEventListener("click", () => {
       const body = await response.json();
       if (!response.ok) throw new Error("删除失败");
       must<HTMLParagraphElement>("adapter-note").textContent = `已删除加密原文 ${String(body.deleted)} 条`;
+    })
+    .catch(showPageError);
+});
+
+must<HTMLButtonElement>("upload-avatar").addEventListener("click", () => {
+  const input = must<HTMLInputElement>("photos");
+  const files = input.files;
+  if (!files || files.length === 0) {
+    showPageError(new Error("请先选择 1 到 5 张照片"));
+    return;
+  }
+  const form = new FormData();
+  form.set("consent", must<HTMLInputElement>("consent").checked ? "true" : "false");
+  form.set("subject_is_minor", must<HTMLInputElement>("minor").checked ? "true" : "false");
+  form.set("sensitive", "false");
+  for (const file of Array.from(files)) form.append("photos", file);
+  void fetch("/api/avatars/jobs", { method: "POST", body: form })
+    .then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : "质检没通过");
+      currentJob = String(payload.job_id ?? "");
+      currentAvatar = String(payload.avatar_id ?? "");
+      const reasons = Array.isArray(payload.reasons) ? payload.reasons.join("；") : "";
+      must<HTMLParagraphElement>("avatar-note").textContent = reasons || `待复核 ${currentAvatar}，生成方式 ${String(payload.generator ?? "")}`;
+      await refreshAvatars();
+    })
+    .catch(showPageError);
+});
+
+must<HTMLButtonElement>("approve-avatar").addEventListener("click", () => {
+  if (!currentJob) return;
+  void fetch(`/api/avatars/jobs/${currentJob}/approve`, { method: "POST" })
+    .then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "不能通过");
+      must<HTMLParagraphElement>("avatar-note").textContent = "已通过，可以用这个角色";
+      await refreshAvatars();
+    })
+    .catch(showPageError);
+});
+
+must<HTMLButtonElement>("regen-avatar").addEventListener("click", () => {
+  if (!currentJob) return;
+  void fetch(`/api/avatars/jobs/${currentJob}/regenerate`, { method: "POST" })
+    .then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "不能重做");
+      must<HTMLParagraphElement>("avatar-note").textContent = `已重做，种子 ${String(payload.seed)}，请再复核`;
+    })
+    .catch(showPageError);
+});
+
+must<HTMLButtonElement>("delete-avatar").addEventListener("click", () => {
+  if (!currentAvatar || currentAvatar.startsWith("preset-")) {
+    showPageError(new Error("请先提交照片任务，预设角色不能删除"));
+    return;
+  }
+  void fetch(`/api/avatars/${currentAvatar}`, { method: "DELETE" })
+    .then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "删除失败");
+      must<HTMLParagraphElement>("avatar-note").textContent = `已删除照片 ${String(payload.deleted_photos)} 张和对应模型`;
+      currentJob = "";
+      currentAvatar = "";
+      await refreshAvatars();
     })
     .catch(showPageError);
 });

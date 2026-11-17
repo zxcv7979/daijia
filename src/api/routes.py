@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from src.adapters.sim_replay import SCENES
+from src.avatar.blendshapes import ARKIT_52, weights_for_emotion
+from src.avatar.gpu import describe_gpu
+from src.avatar.jobs import AvatarError
+from src.avatar.switch import switch_plan
 from src.models import AvatarType, EmotionName, EventType, PrintStyle, dump_model
 from src.runtime import Context
 from src.settings import ConfigError
@@ -406,6 +410,110 @@ async def debug_step(request: Request) -> dict[str, object]:
             "nickname": "单步",
         }
     )
+
+
+def _public_job(job: dict) -> dict:
+    data = dict(job)
+    gpu = data.get("gpu")
+    if isinstance(gpu, dict):
+        data["gpu"] = {key: gpu[key] for key in ("cuda", "cloud_api", "reconstruction_ran", "mode", "note") if key in gpu}
+    if data.get("glb_rel"):
+        data["url"] = "/avatar-files/" + str(data["glb_rel"])
+    return data
+
+
+@router.get("/api/avatars")
+async def list_avatars(request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    return {
+        "active": ctx.active_avatar_id,
+        "assets": ctx.avatars.list_assets(),
+        "gpu": describe_gpu(),
+    }
+
+
+@router.get("/api/avatars/blendshapes")
+async def blendshapes(emotion: str = "joy", intensity: float = 1.0) -> dict[str, object]:
+    weights = weights_for_emotion(emotion, intensity)
+    return {"names": list(ARKIT_52), "count": len(ARKIT_52), "emotion": emotion, "weights": weights}
+
+
+@router.post("/api/avatars/active")
+async def activate_avatar(request: Request, avatar_id: str = Form(...)) -> dict[str, object]:
+    ctx = _ctx(request)
+    path = ctx.avatars.file_for(avatar_id)
+    loaded = path is not None
+    plan = switch_plan(current=ctx.active_avatar_id, incoming=avatar_id, loaded=loaded)
+    if plan == "keep-current":
+        raise HTTPException(status_code=404, detail="角色文件还没准备好，画面保持上一个角色")
+    ctx.active_avatar_id = avatar_id
+    return {"active": avatar_id, "plan": plan, "url": f"/avatar-files/{path.relative_to(ctx.avatars.avatar_dir).as_posix()}" if path else ""}
+
+
+@router.post("/api/avatars/jobs")
+async def create_avatar_job(
+    request: Request,
+    consent: bool = Form(False),
+    subject_is_minor: bool = Form(False),
+    sensitive: bool = Form(False),
+    avatar_id: str = Form(""),
+    preset_id: str = Form(""),
+    photos: list[UploadFile] = File(...),
+) -> dict[str, object]:
+    ctx = _ctx(request)
+    payloads: list[tuple[str, bytes]] = []
+    for item in photos:
+        payloads.append((item.filename or "photo", await item.read()))
+    try:
+        job = ctx.avatars.submit_photos(
+            payloads,
+            consent=consent,
+            subject_is_minor=subject_is_minor,
+            sensitive=sensitive,
+            avatar_id=avatar_id or None,
+            preset_id=preset_id or None,
+        )
+    except AvatarError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    return _public_job(job)
+
+
+@router.get("/api/avatars/jobs/{job_id}")
+async def get_avatar_job(job_id: str, request: Request) -> dict[str, object]:
+    job = _ctx(request).avatars.store.get_avatar_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="找不到这个任务")
+    return _public_job(job)
+
+
+@router.post("/api/avatars/jobs/{job_id}/approve")
+async def approve_avatar_job(job_id: str, request: Request) -> dict[str, object]:
+    try:
+        return _public_job(_ctx(request).avatars.approve(job_id))
+    except AvatarError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.post("/api/avatars/jobs/{job_id}/regenerate")
+async def regenerate_avatar_job(job_id: str, request: Request) -> dict[str, object]:
+    try:
+        return _public_job(_ctx(request).avatars.regenerate(job_id))
+    except AvatarError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.delete("/api/avatars/{avatar_id}")
+async def delete_avatar(avatar_id: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    try:
+        result = ctx.avatars.delete_avatar(avatar_id)
+    except AvatarError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    if ctx.active_avatar_id == avatar_id:
+        ctx.active_avatar_id = "preset-yuan"
+        result["active"] = ctx.active_avatar_id
+        result["plan"] = "crossfade"
+    return result
 
 
 @router.get("/api/audit")

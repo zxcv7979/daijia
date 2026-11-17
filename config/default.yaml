@@ -88,6 +88,12 @@ print_show:
 bus:
   reconnect_buffer_sec: 30
 
+avatar:
+  photo_retention_days: 7
+  seed: 42
+  gpu_enabled: false
+  cloud_api: false
+
 # OBS 浏览器源读这份配置，改完不用重新构建页面。
 overlay:
   width: 1920

@@ -10,6 +10,7 @@ apps/*/dist/
 data/*.db
 data/*.db-*
 data/audit/
+data/avatars/derived/
 config/secrets.yaml
 *.sqlite
 *.sqlite3
