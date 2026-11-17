@@ -59,10 +59,18 @@ emotion:
 
 print_show:
   default_duration_sec: 45
+  show_min_sec: 30
+  show_max_sec: 60
   progress_cues: [25, 50, 75, 90, 100]
   # 介于 L3(5) 与 L4(8) 之间：里程碑能打断中礼物，但不能抢走榜一主情绪。
   cue_priority: 6
   cue_hold_ms: 800
+  grain: 0.45
+  camera_orbit: 1.0
+  reveal_lights: 1.0
+  # 只有全息可以插到正在打印的任务后面，不能把热床上的那一件挤掉。
+  queue_jump: true
+  jump_min_style: hologram
   cue_table:
     25:
       emotion: hype
@@ -80,10 +88,14 @@ print_show:
       emotion: awe
       intensity: 0.9
       fx: print_progress_90
+      beat: hold_breath
+      hold_ms: 1600
     100:
       emotion: joy
       intensity: 0.97
       fx: print_progress_100
+      beat: burst
+      hold_ms: 900
 
 bus:
   reconnect_buffer_sec: 30
@@ -114,3 +126,5 @@ overlay:
     print_hologram: ""
     bangyi_rank1: ""
     danmaku_float: ""
+    print_progress_90: ""
+    print_progress_100: ""

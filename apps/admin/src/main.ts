@@ -187,9 +187,16 @@ app.innerHTML = `
             <option value="stylized">风格化</option>
             <option value="real">真人向</option>
           </select>
-          <input id="duration" type="number" min="0.2" max="600" value="45" />
+          <input id="duration" type="number" min="30" max="60" value="45" />
           <button id="print" type="button">创建任务</button>
+          <button id="fail-print" type="button">失败并补偿</button>
         </div>
+        <div class="row">
+          <label class="check">层纹 <input id="grain" type="range" min="0" max="100" value="45" /></label>
+          <label class="check">环绕 <input id="orbit" type="range" min="0" max="100" value="50" /></label>
+          <label class="check">揭晓灯 <input id="lights" type="range" min="0" max="100" value="50" /></label>
+        </div>
+        <p class="muted">时长 30–60 秒。全息可以插到正在打印的任务后面，不会打断热床上的那一件。</p>
         <div id="jobs" class="muted"></div>
       </div>
     </section>
@@ -342,12 +349,13 @@ async function refreshReplay() {
 }
 
 async function refreshJobs() {
-  const jobs = await api<Array<{ job_id: string; style: string; status: string; progress: number }>>("/api/print-jobs");
+  const jobs = await api<Array<{ job_id: string; style: string; status: string; progress: number; phase?: string; active?: boolean }>>("/api/print-jobs");
   const box = must<HTMLDivElement>("jobs");
   box.replaceChildren();
-  for (const job of jobs.slice(0, 6)) {
+  for (const job of jobs.slice(0, 8)) {
     const line = document.createElement("div");
-    line.textContent = `${job.style} · ${job.status} · ${job.progress.toFixed(0)}% · ${job.job_id.slice(0, 8)}`;
+    const mark = job.active ? "热床" : "排队";
+    line.textContent = `${mark} · ${job.style} · ${job.phase ?? job.status} · ${job.progress.toFixed(0)}% · ${job.job_id.slice(0, 8)}`;
     box.append(line);
   }
 }
@@ -515,6 +523,25 @@ must<HTMLButtonElement>("print").addEventListener("click", () => {
       duration_sec: duration,
     }),
   }).then(refreshJobs).catch(showPageError);
+});
+
+function pushPrintSettings() {
+  void api("/api/print-show/settings", {
+    method: "POST",
+    body: JSON.stringify({
+      grain: Number(must<HTMLInputElement>("grain").value) / 100,
+      camera_orbit: Number(must<HTMLInputElement>("orbit").value) / 50,
+      reveal_lights: Number(must<HTMLInputElement>("lights").value) / 50,
+    }),
+  }).catch(showPageError);
+}
+
+for (const id of ["grain", "orbit", "lights"]) {
+  must<HTMLInputElement>(id).addEventListener("change", pushPrintSettings);
+}
+
+must<HTMLButtonElement>("fail-print").addEventListener("click", () => {
+  void api("/api/print-show/fail", { method: "POST", body: "{}" }).then(refreshJobs).catch(showPageError);
 });
 
 must<HTMLInputElement>("real-source").addEventListener("change", (ev) => {

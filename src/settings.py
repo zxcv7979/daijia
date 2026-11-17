@@ -144,14 +144,23 @@ class PrintCueCfg(BaseModel):
     emotion: EmotionName
     intensity: float = Field(ge=0, le=1)
     fx: str = Field(min_length=1, max_length=64)
+    beat: str = ""
+    hold_ms: int | None = Field(default=None, ge=100, le=8_000)
 
 
 class PrintShowCfg(BaseModel):
     default_duration_sec: float = Field(default=45, gt=0, le=600)
+    show_min_sec: float = Field(default=30, gt=0, le=120)
+    show_max_sec: float = Field(default=60, gt=0, le=180)
     progress_cues: list[int] = Field(default_factory=lambda: [25, 50, 75, 90, 100])
     cue_priority: int = Field(default=6, ge=0, le=100)
     cue_hold_ms: int = Field(default=800, ge=100, le=8_000)
     cue_table: dict[int, PrintCueCfg]
+    grain: float = Field(default=0.45, ge=0, le=1)
+    camera_orbit: float = Field(default=1.0, ge=0, le=2)
+    reveal_lights: float = Field(default=1.0, ge=0, le=2)
+    queue_jump: bool = True
+    jump_min_style: PrintStyle = PrintStyle.hologram
 
     @field_validator("progress_cues")
     @classmethod

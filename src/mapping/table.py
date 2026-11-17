@@ -22,6 +22,7 @@ class Resolution:
     fired: bool = True
     particles: int = 24
     secondary: bool = False
+    beat: str = ""
 
 
 class MappingTable:

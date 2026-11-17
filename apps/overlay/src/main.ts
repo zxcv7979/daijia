@@ -83,8 +83,10 @@ async function pullConfig() {
     if (!response.ok) return;
     config = { ...fallbackConfig, ...(await response.json()) };
     muted = Boolean(config.mute);
-    if (typeof config.seek === "number" && scene) scene.timeline.progress(config.seek);
-    else if (scene && scene.timeline.paused()) scene.timeline.play();
+    if (typeof config.seek === "number" && scene) {
+      scene.timeline.progress(config.seek);
+      scene.setPrint(config.seek * 100);
+    } else if (scene && scene.timeline.paused()) scene.timeline.play();
   } catch {
     /* 配置接口暂时不可用时沿用上一份。 */
   }
@@ -169,10 +171,13 @@ function handle(msg: Envelope) {
     if (scene && scene.timeline.progress() === 0) scene.timeline.play();
   } else if (msg.kind === "print_progress" || msg.kind === "print_job") {
     printProgress = Number(msg.data.progress ?? printProgress);
+    printHud = String(msg.data.hud ?? printHud);
     scene?.setPrint(printProgress);
+    scene?.setStyle(String(msg.data.style ?? "cartoon"));
   }
 }
 
+let printHud = "";
 let last = performance.now();
 let fps = 0;
 let workMs = 0;
@@ -208,7 +213,7 @@ function loop(now: number) {
       renderer: scene ? "webgl" : fx ? "pixi" : "none",
     };
     (window as Window & { __overlayStats?: typeof stats }).__overlayStats = stats;
-    hud.textContent = `${stats.fps} fps · 绘制 ${stats.frame_ms} ms · 粒子 ${stats.particles} · 特效 ${stats.fx}${stats.downshifted ? " · 降档" : ""}`;
+    hud.textContent = `${printHud ? printHud + " · " : ""}${stats.fps} fps · 绘制 ${stats.frame_ms} ms · 粒子 ${stats.particles} · 特效 ${stats.fx}${stats.downshifted ? " · 降档" : ""}`;
     void fetch("/api/overlay/stats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

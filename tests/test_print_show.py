@@ -28,9 +28,9 @@ def test_progress_marks_and_status(project, tmp_path):
         assert job.progress == 25
         assert job.status.value == "printing"
         assert printer._emitted[job.job_id] == {25}
-        clock.advance(5)  # 7.5s → 75%
+        clock.advance(5)  # 7.5s → 75%，仍在层层生长
         printer.tick()
-        assert job.status.value == "refining"
+        assert job.status.value == "printing"
         assert 50 in printer._emitted[job.job_id]
         assert 75 in printer._emitted[job.job_id]
         clock.advance(2.5)

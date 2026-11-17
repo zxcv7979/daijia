@@ -159,7 +159,7 @@ python -m pytest -q tests/test_load.py
 - `adapters.governance`：心跳、退避上限 5 秒、`event_id` 去重窗口、队列容量。队列满时丢掉最旧的一条并记 `backpressure` 告警，好让新的观众事件还能进来。
 - `normalize.danmaku_aggregate_window_ms`：必须是 `200`。
 - `emotion.rise_ms`：150–300。`decay_half_life_s`：4–8。`max_on_screen` 和 `ducking` 控制同时在场的情绪。
-- `print_show.default_duration_sec`：默认 45 秒。进度点固定 25/50/75/90/100。
+- `print_show.default_duration_sec`：默认 45 秒，管理页限制在 30–60。进度点固定 25/50/75/90/100。层纹、环绕、揭晓灯和插队规则见 [docs/p5-print-show.md](docs/p5-print-show.md)。全息可以排到正在打印的任务后面，不会把热床上的那一件挤掉。画面只改裁切平面，不连真实打印机。
 - `bus.reconnect_buffer_sec`：必须是 30。
 
 映射在 `config/mappings.yaml`：
@@ -226,7 +226,7 @@ SQLite 在 `data/live_show.db`，存打码后的事件、虚拟打印任务和�
 - [x] 峰值 200 条/秒零丢弃。`test_burst_endpoint_two_hundred_in_one_second` 与 `test_two_hundred_concurrent_events_are_not_dropped`。
 - [x] 30 秒重连缓冲有效。`test_buffer_keeps_30s_and_replays_cursor` 用假时钟推进到 31 秒；`test_ws_replays_missed_events_and_strips_pii` 在断开期间触发 L4，重连后能补到 `fx_cue`。
 - [x] YAML 热加载。合法修改立刻改变 L0 情绪；非法 YAML 返回 400，进程和旧映射都还在。`test_api_rejects_bad_yaml_and_keeps_serving`。
-- [x] 管理页能触发 L0–L4，也能创建虚拟打印并跑到 `done`。对应 API 测试：`test_manual_levels_and_print_job`。页面按钮走同一组接口。
+- [x] 管理页能触发 L0–L4，也能创建虚拟打印并跑到 `done`。对应 API 测试：`test_manual_levels_and_print_job`。页面按钮走同一组接口。时间轴可拖到任意进度。队列、插队和失败补偿见 `tests/test_print_timeline.py`。实机 60fps 与 20 条画面泄漏检查为待实机验收，无头脚本是 `python scripts/print_queue_bench.py --jobs 20`。
 - [x] 三个剧本可从 API 启动。小礼物合并成一条 `combo_count=10` 的喜悦事件且不打印；榜一礼物开出全息任务且情绪保持震撼。`test_scripted_scenes`。
 - [x] `REAL_SOURCE` 关闭时，回放、模拟源和演示管道仍可用。没有二次确认就不会写 `real_source_enabled`。`test_real_source_off_keeps_demo_and_blocks_silent_enable`。
 - [x] 二次确认后可以健康检查官方桩，状态是降级，推送条数为 0，并写审计。`test_confirmed_real_source_audits_and_degrades`。

@@ -17,6 +17,7 @@ export type SceneHandle = {
   setLip: (amount: number) => void;
   showAvatar: (url: string) => Promise<{ ok: boolean; loadMs: number; kept: boolean }>;
   setPrint: (progress: number) => void;
+  setStyle: (style: string) => void;
   setQuality: (level: number) => void;
   tick: (time: number) => void;
   resize: (width: number, height: number) => void;
@@ -107,6 +108,39 @@ export function createScene(width: number, height: number): SceneHandle | null {
   pedestal.position.set(1.35, -1.45, 0);
   scene.add(pedestal);
 
+  const bed = new THREE.Mesh(
+    new THREE.BoxGeometry(1.4, 0.06, 1.4),
+    new THREE.MeshStandardMaterial({ color: 0x2a241c, roughness: 0.8 }),
+  );
+  bed.position.set(0, -1.55, 0);
+  const nozzle = new THREE.Mesh(
+    new THREE.ConeGeometry(0.06, 0.18, 8),
+    new THREE.MeshStandardMaterial({ color: 0xd7dde8, metalness: 0.6, roughness: 0.3 }),
+  );
+  const filament = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xf0a202 }),
+  );
+  filament.position.set(0.2, -0.7, 0);
+  const statusLight = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0x3cba8b, emissive: 0x145c40 }),
+  );
+  statusLight.position.set(-0.55, -1.4, 0.55);
+  scene.add(bed, nozzle, filament, statusLight);
+  const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1);
+  renderer.localClippingEnabled = true;
+  skin.clippingPlanes = [clipPlane];
+  skin.clipShadows = true;
+  const cap = new THREE.Mesh(
+    new THREE.CircleGeometry(0.72, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf0c8a0, side: THREE.DoubleSide }),
+  );
+  cap.rotation.x = Math.PI / 2;
+  scene.add(cap);
+  let printStyle = "cartoon";
+  const emotionTint = new THREE.Color();
+
   const rig: ShowRig = { camZ: 4.4, sway: 0.08, print: 0 };
   const timeline = gsap.timeline({ paused: true });
   timeline
@@ -191,7 +225,13 @@ export function createScene(width: number, height: number): SceneHandle | null {
       next.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         if (!mesh.isMesh) return;
-        mesh.material = Array.isArray(mesh.material) ? mesh.material.map((item) => item.clone()) : mesh.material.clone();
+        const cloned = Array.isArray(mesh.material) ? mesh.material.map((item) => item.clone()) : mesh.material.clone();
+        mesh.material = cloned;
+        const materials = Array.isArray(cloned) ? cloned : [cloned];
+        for (const material of materials) {
+          material.clippingPlanes = [clipPlane];
+          material.clipShadows = true;
+        }
       });
       opacityOf(next, 0);
       scene.add(next);
@@ -219,6 +259,25 @@ export function createScene(width: number, height: number): SceneHandle | null {
     },
     setPrint(progress) {
       printProgress = progress;
+    },
+    setStyle(style: string) {
+      printStyle = style;
+      if (style === "hologram") {
+        skin.transparent = true;
+        skin.opacity = 0.55;
+        skin.emissive = new THREE.Color(0x3a6ea5);
+        skin.wireframe = false;
+      } else if (style === "realistic") {
+        skin.transparent = false;
+        skin.opacity = 1;
+        skin.emissive = new THREE.Color(0x000000);
+        skin.wireframe = false;
+      } else {
+        skin.transparent = false;
+        skin.opacity = 1;
+        skin.emissive = new THREE.Color(0x5a3a20);
+        skin.wireframe = false;
+      }
     },
     setQuality(level: number) {
       if (level === qualityLevel) return;
@@ -249,12 +308,35 @@ export function createScene(width: number, height: number): SceneHandle | null {
       if (head.morphTargetInfluences) head.morphTargetInfluences[0] = Math.max(jawOpen, lip);
       brow.position.y = 0.28 + (emotion === "alert" ? 0.04 : intensity * 0.03);
       browR.position.y = brow.position.y;
-      const tint = new THREE.Color(EMOTION_COLOR[emotion] ?? EMOTION_COLOR.ambient);
-      key.color.copy(tint);
+      emotionTint.setHex(EMOTION_COLOR[emotion] ?? EMOTION_COLOR.ambient);
+      key.color.copy(emotionTint);
       camera.position.z = rig.camZ - intensity * 0.25;
       printBlock.scale.y = Math.max(0.04, (rig.print * 0.5 + printProgress / 100) * 1.2);
       printBlock.position.y = -1.4 + printBlock.scale.y * 0.5;
+      const clip = clipY(printProgress);
+      clipPlane.constant = clip;
+      cap.position.y = clip * 0.8;
+      nozzle.position.set(0, clip * 0.8 + 0.2, 0.9);
+      skin.wireframe = printProgress >= 85 && printProgress < 92;
+      const lightOn = printProgress >= 95 ? 0.8 : printProgress > 0 ? 0.25 : 0.05;
+      const lightMat = statusLight.material as THREE.MeshStandardMaterial;
+      lightMat.emissive.setHex(printStyle === "hologram" ? 0x1a4d7a : 0x145c40);
+      lightMat.emissive.multiplyScalar(lightOn + 0.2);
+      cap.visible = printProgress > 0 && printProgress < 85;
+      if (printProgress >= 95) {
+        const spin = ((printProgress - 95) / 5) * 1.4;
+        camera.position.x = Math.sin(spin) * 0.7;
+      } else {
+        camera.position.x = 0;
+      }
+      camera.lookAt(0, 0.1, 0);
       renderer.render(scene, camera);
     },
   };
+}
+
+function clipY(progress: number): number {
+  if (progress < 5) return -1;
+  if (progress >= 85) return 1;
+  return -1 + ((progress - 5) / 80) * 2;
 }

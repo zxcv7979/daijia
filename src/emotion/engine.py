@@ -149,9 +149,10 @@ class EmotionEngine:
             intensity=cue_cfg.intensity,
             fx=cue_cfg.fx,
             atmosphere_only=False,
-            hold_ms=cfg.print_show.cue_hold_ms,
+            hold_ms=cue_cfg.hold_ms or cfg.print_show.cue_hold_ms,
             print_style=None,
             print_avatar=None,
+            beat=cue_cfg.beat,
         )
         self._activate(resolution, source_event=job_id, bypass_cooldown=True)
         return resolution
@@ -276,6 +277,7 @@ class EmotionEngine:
         payload["particles"] = resolution.particles
         payload["secondary"] = resolution.secondary
         payload["print"] = resolution.print_style is not None
+        payload["beat"] = resolution.beat
         self.bus.publish("fx_cue", payload)
         return payload
 

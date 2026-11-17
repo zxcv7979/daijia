@@ -52,6 +52,14 @@ class MappingIn(BaseModel):
     yaml: str = Field(min_length=1, max_length=100_000)
 
 
+class PrintSettingsIn(BaseModel):
+    grain: float | None = Field(default=None, ge=0, le=1)
+    camera_orbit: float | None = Field(default=None, ge=0, le=2)
+    reveal_lights: float | None = Field(default=None, ge=0, le=2)
+    default_duration_sec: float | None = Field(default=None, ge=30, le=60)
+    queue_jump: bool | None = None
+
+
 class PrintIn(BaseModel):
     avatar_id: str | None = None
     avatar_type: AvatarType = AvatarType.stylized
@@ -237,6 +245,24 @@ async def get_job(job_id: str, request: Request) -> dict[str, object]:
     if job is None:
         raise HTTPException(status_code=404, detail="找不到打印任务")
     return job
+
+
+@router.get("/api/print-show/settings")
+async def print_settings(request: Request) -> dict[str, object]:
+    return _ctx(request).printer.update_runtime({})
+
+
+@router.post("/api/print-show/settings")
+async def update_print_settings(body: PrintSettingsIn, request: Request) -> dict[str, object]:
+    return _ctx(request).printer.update_runtime(body.model_dump())
+
+
+@router.post("/api/print-show/fail")
+async def fail_print(request: Request) -> dict[str, object]:
+    replay = _ctx(request).printer.fail_active()
+    if replay is None:
+        raise HTTPException(status_code=404, detail="没有正在打印的任务")
+    return dump_model(replay)
 
 
 @router.post("/api/print-jobs")
