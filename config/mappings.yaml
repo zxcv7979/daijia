@@ -1,0 +1,83 @@
+# 本地档位映射。price 是演示用的档位分，不是平台礼物标价，也不是官方礼物 ID。
+# gift_id 只是样本里的本地标签（local_*）。
+
+tiers:
+  L0:
+    priority: 0
+    emotion: ambient
+    intensity: 0.18
+    fx: sparkle_ambient
+    particles: 8
+    secondary: false
+    hold_ms: 600
+    triggers:
+      - type: like
+      - type: enter
+  L1:
+    priority: 1
+    emotion: ambient
+    intensity: 0.28
+    fx: danmaku_float
+    particles: 16
+    secondary: true
+    atmosphere_only: true
+    hold_ms: 800
+    triggers:
+      - type: danmaku
+        keywords: ["榜一"]
+        fx: danmaku_rank_hint
+      - type: danmaku
+      - type: comment
+  L2:
+    priority: 3
+    emotion: joy
+    intensity: 0.55
+    fx: gift_pop
+    particles: 48
+    secondary: true
+    hold_ms: 1400
+    triggers:
+      - type: follow
+      - type: gift
+        price_max: 9
+      - type: combo
+        price_max: 9
+  L3:
+    priority: 5
+    emotion: hype
+    intensity: 0.78
+    fx: print_cartoon
+    particles: 80
+    secondary: true
+    hold_ms: 2200
+    triggers:
+      - type: gift
+        price_min: 10
+        price_max: 99
+      - type: combo
+        price_min: 10
+        price_max: 99
+    print:
+      style: cartoon
+      avatar_type: stylized
+  L4:
+    priority: 8
+    emotion: awe
+    intensity: 0.96
+    fx: print_hologram
+    particles: 120
+    secondary: true
+    hold_ms: 2800
+    triggers:
+      # 榜一时刻：高档位分 + highlight=rank1，特效名单独区分，打印仍走全息。
+      - type: gift
+        price_min: 100
+        highlight: rank1
+        fx: bangyi_rank1
+      - type: gift
+        price_min: 100
+      - type: combo
+        price_min: 100
+    print:
+      style: hologram
+      avatar_type: stylized

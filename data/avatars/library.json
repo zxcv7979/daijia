@@ -1,0 +1,23 @@
+[
+  {
+    "file": "presets/yuan.glb",
+    "name": "圆圆",
+    "bytes": 53960,
+    "license": "本仓库原创参数化网格，可随仓库使用和修改",
+    "source": "scripts/build_preset_avatars.py"
+  },
+  {
+    "file": "presets/qing.glb",
+    "name": "青青",
+    "bytes": 53964,
+    "license": "本仓库原创参数化网格，可随仓库使用和修改",
+    "source": "scripts/build_preset_avatars.py"
+  },
+  {
+    "file": "presets/he.glb",
+    "name": "禾禾",
+    "bytes": 53964,
+    "license": "本仓库原创参数化网格，可随仓库使用和修改",
+    "source": "scripts/build_preset_avatars.py"
+  }
+]
