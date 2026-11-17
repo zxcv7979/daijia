@@ -1,0 +1,13 @@
+{
+  "name": "live-show",
+  "private": true,
+  "workspaces": [
+    "apps/admin",
+    "apps/overlay"
+  ],
+  "scripts": {
+    "build": "npm run build -w live-show-admin && npm run build -w live-show-overlay",
+    "dev:admin": "npm run dev -w live-show-admin",
+    "dev:overlay": "npm run dev -w live-show-overlay"
+  }
+}

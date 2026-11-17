@@ -1,0 +1,6 @@
+{"source_msg_id":"b1","type":"enter","user_id":"big-host","nickname":"场控","delay_ms":0}
+{"source_msg_id":"b2","type":"danmaku","user_id":"big-aud-1","nickname":"观众甲","text":"有大佬进场","delay_ms":200}
+{"source_msg_id":"b3","type":"gift","user_id":"big-rank1","nickname":"榜一哥","gift_id":"local_flagship","gift_name":"榜一星舰","price":520,"combo_count":1,"highlight":"rank1","delay_ms":400}
+{"source_msg_id":"b4","type":"danmaku","user_id":"big-aud-2","nickname":"观众乙","text":"榜一榜一","delay_ms":150}
+{"source_msg_id":"b5","type":"danmaku","user_id":"big-aud-3","nickname":"观众丙","text":"全息打印走起","delay_ms":150}
+{"source_msg_id":"b6","type":"like","user_id":"big-aud-4","nickname":"观众丁","delay_ms":200}

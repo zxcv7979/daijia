@@ -1,0 +1,74 @@
+# P1 本地演示配置。修改后由进程内观察者热加载，无需重启。
+# 真实采集默认关闭。官方适配器必须保持 enabled: false。
+
+live:
+  collection_enabled: false
+
+server:
+  host: 127.0.0.1
+  port: 8787
+
+adapters:
+  sim_replay:
+    enabled: true
+    samples_dir: data/samples
+    default_replay: replay.jsonl
+    default_speed: 1
+    speeds: [1, 5, 20]
+    loop: false
+  official:
+    # P1 禁止打开。没有登录、签名、Cookie 或平台接口实现。
+    enabled: false
+    mode: stub
+
+normalize:
+  dedup_window_sec: 30
+  combo_merge_window_ms: 800
+  # 同文弹幕聚合窗口固定 200ms，不允许改成 2s。
+  danmaku_aggregate_window_ms: 200
+  ts_bucket_ms: 100
+
+emotion:
+  rise_ms: 220
+  hold_ms: 1200
+  decay_half_life_s: 6
+  max_on_screen: 8
+  ducking:
+    enabled: true
+  cooldowns_ms:
+    L0: 200
+    L1: 300
+    L2: 1000
+    L3: 3000
+    L4: 6000
+
+print_show:
+  default_duration_sec: 45
+  progress_cues: [25, 50, 75, 90, 100]
+  # 介于 L3(5) 与 L4(8) 之间：里程碑能打断中礼物，但不能抢走榜一主情绪。
+  cue_priority: 6
+  cue_hold_ms: 800
+  cue_table:
+    25:
+      emotion: hype
+      intensity: 0.45
+      fx: print_progress_25
+    50:
+      emotion: hype
+      intensity: 0.62
+      fx: print_progress_50
+    75:
+      emotion: awe
+      intensity: 0.78
+      fx: print_progress_75
+    90:
+      emotion: awe
+      intensity: 0.9
+      fx: print_progress_90
+    100:
+      emotion: joy
+      intensity: 0.97
+      fx: print_progress_100
+
+bus:
+  reconnect_buffer_sec: 30

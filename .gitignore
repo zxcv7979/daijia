@@ -1,0 +1,16 @@
+.venv/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+apps/*/dist/
+data/*.db
+data/*.db-*
+data/audit/
+config/secrets.yaml
+*.sqlite
+*.sqlite3
+.DS_Store

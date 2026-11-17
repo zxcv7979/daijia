@@ -1,0 +1,19 @@
+# 合规约束（P1）。审计不可关闭。真实采集即使被标成开启，也不会连接平台。
+
+pii:
+  hash_algorithm: sha256
+  nickname_mask: first_char
+  strip_raw_before_ws: true
+  salt_env: LIVE_SHOW_SALT
+  # 仅当环境变量和 secrets.yaml 都不存在时使用。不要用于生产。
+  demo_salt: "demo-salt-not-for-production"
+
+audit:
+  path: data/audit/audit.jsonl
+  # 打开真实采集时必须写审计。代码不会读取 false 来跳过审计。
+  record_collection_enable: true
+
+live_collection:
+  default_enabled: false
+  official_adapter: disabled
+  note: "P1 不实现任何平台登录、签名、Cookie、反爬或官方接口。"
