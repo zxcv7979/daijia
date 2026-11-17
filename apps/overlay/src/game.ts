@@ -65,6 +65,8 @@ export type FxPerformance = {
   particles: number;
   secondary: boolean;
   atmosphere_only?: boolean;
+  emotion?: string;
+  intensity?: number;
 };
 
 export type ScoreEntry = { name: string; score: number };
@@ -324,6 +326,31 @@ export function createGame(width: number, height: number): GameHandle | null {
         kind: "leaf",
         spin: (Math.random() - 0.5) * 4,
       });
+    }
+  }
+
+  // 后台气氛档位 / 场景 / 情绪滑块触发的氛围特效：只放粒子与冲击波，
+  // 不上头像墙、不弹弹幕气泡、不计分。
+  function atmosphereFx(fxName: string, gift: boolean, performance: FxPerformance) {
+    const emotion = performance.emotion ?? "ambient";
+    const intensity = Math.max(0, Math.min(1, performance.intensity ?? 0.5));
+    const color = MOOD_COLOR[emotion] ?? MOOD_COLOR.ambient;
+    const baseCount = performance.particles ?? 16;
+    const count = Math.round(baseCount * (0.7 + intensity * 0.6));
+    const highGift =
+      gift || /gift_pop|print_cartoon|print_hologram|bangyi_rank1/.test(fxName);
+    if (highGift) {
+      // 高档礼物/榜一：主舞台中央偏上礼花爆发，右上副点补射 + 环形冲击波。
+      burst(width / 2, height * 0.34, color, Math.round(count * 0.6), true);
+      burst(width * 0.78, height * 0.3, color, Math.round(count * 0.4), true);
+    } else {
+      // 氛围/弹幕：画面中下部多处轻量漂浮粒子。
+      const spots = 3;
+      for (let s = 0; s < spots; s += 1) {
+        const x = width * (0.2 + Math.random() * 0.6);
+        const y = height * (0.45 + Math.random() * 0.35);
+        burst(x, y, color, Math.max(4, Math.floor(count / spots)), false);
+      }
     }
   }
 
@@ -1186,14 +1213,9 @@ export function createGame(width: number, height: number): GameHandle | null {
     removeViewer,
     scores: () => [...scores.entries()].map(([name, score]) => ({ name, score })),
     spawn(text, kind, performance, level, hardCap, fxCap, avatarUrl, nickname, source) {
-      // 性能 cue 只触发后台特效，不上头像墙、不弹评论气泡。
+      // 后台气氛档位 / 场景 / 滑块 cue：只放氛围粒子与冲击波，不上墙、不弹气泡、不计分。
       if (source === "fx_cue") {
-        void text;
-        void kind;
-        void performance;
-        void level;
-        void hardCap;
-        void fxCap;
+        atmosphereFx(text, kind === "gift", performance);
         return;
       }
       const name = nickname || "匿名观众";

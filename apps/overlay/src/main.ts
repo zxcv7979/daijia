@@ -215,6 +215,8 @@ function handle(msg: Envelope) {
     const performance = performanceFor(name);
     performance.particles = Number(msg.data.particles ?? performance.particles);
     performance.secondary = Boolean(msg.data.secondary ?? performance.secondary);
+    performance.emotion = String(msg.data.emotion ?? "ambient");
+    performance.intensity = Number(msg.data.intensity ?? 0.5);
     const gift = Boolean(msg.data.print);
     game?.spawn(name, gift ? "gift" : "danmaku", performance, quality.level, config.max_particles, config.max_fx, null, null, "fx_cue");
     playCue(name);
