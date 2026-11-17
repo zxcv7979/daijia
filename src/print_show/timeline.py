@@ -11,6 +11,12 @@ STYLE_RANK = {
 }
 
 
+def progress_from_seek(seek: float) -> float:
+    """调试台 0–1 的拖动位置对应打印进度。"""
+
+    return max(0.0, min(1.0, seek)) * 100
+
+
 def phase_of(progress: float) -> str:
     if progress < 5:
         return "preheat"

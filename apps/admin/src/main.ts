@@ -78,6 +78,7 @@ app.innerHTML = `
           <button type="button" data-speed="5">5x</button>
           <button type="button" data-speed="20">20x</button>
           <button id="burst" type="button">突发 200 条/秒</button>
+          <button id="replay-session" type="button">回放本场</button>
         </div>
         <p id="replay" class="muted"></p>
       </div>
@@ -464,6 +465,14 @@ document.querySelectorAll<HTMLButtonElement>("[data-speed]").forEach((button) =>
       .then(refreshReplay)
       .catch(showPageError);
   });
+});
+
+must<HTMLButtonElement>("replay-session").addEventListener("click", () => {
+  void api<{ replayed: number }>("/api/replay/session", { method: "POST", body: "{}" })
+    .then((body) => {
+      must<HTMLParagraphElement>("replay").textContent = `已回放本场 ${body.replayed} 条`;
+    })
+    .catch(showPageError);
 });
 
 must<HTMLButtonElement>("burst").addEventListener("click", () => {

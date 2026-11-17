@@ -192,6 +192,11 @@ async def replay_start(body: ReplayStartIn, request: Request) -> dict[str, objec
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/api/replay/session")
+async def replay_session(request: Request) -> dict[str, object]:
+    return await _ctx(request).replay_session()
+
+
 @router.post("/api/replay/stop")
 async def replay_stop(request: Request) -> dict[str, object]:
     return await _ctx(request).replay.stop()

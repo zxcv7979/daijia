@@ -11,7 +11,7 @@ from typing import Any
 from src.models import AvatarType, PrintStyle
 from src.ops.alerts import adapter_problem, raise_alert
 from src.ops.degrade import PRESET_FALLBACK, canned_frame
-from src.ops.metrics import budget_breaches, growth, sample_metrics
+from src.ops.metrics import budget_breaches, growth, growth_ratio, sample_metrics
 from src.ops.retention import cleanup_expired_photos
 from src.runtime import Context
 
@@ -84,14 +84,20 @@ async def run_soak(source: Path, dest: Path, *, duration_sec: float, interval_se
     finally:
         await ctx.shutdown()
     breaches = budget_breaches(samples, rss_kb=RSS_BUDGET_KB, fds=FD_BUDGET)
+    ratio = growth_ratio(samples)
+    full_8h = duration_sec >= 8 * 3600 - 1
+    if full_8h and ratio is not None and ratio >= 0.20:
+        breaches.append("rss_ratio")
     return {
         "duration_sec": round(time.monotonic() - started, 3),
         "samples": len(samples),
         "growth": growth(samples),
+        "rss_growth_ratio": ratio,
         "gpu_seen": any(item.get("gpu") for item in samples),
         "breaches": breaches,
         "canned_steps": canned_steps,
         "retention": retention,
         "ok": not breaches,
-        "full_8h": False,
+        "full_8h": full_8h,
+        "webgl_context_loss": "待实机验收",
     }

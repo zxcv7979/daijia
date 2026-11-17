@@ -71,6 +71,16 @@ def _delta(samples: list[dict[str, Any]], key: str) -> int | None:
     return int(end) - int(start)
 
 
+def growth_ratio(samples: list[dict[str, Any]], key: str = "rss_kb") -> float | None:
+    if len(samples) < 2:
+        return None
+    start = samples[0].get(key)
+    end = samples[-1].get(key)
+    if start in (None, 0) or end is None:
+        return None
+    return (float(end) - float(start)) / float(start)
+
+
 def budget_breaches(samples: list[dict[str, Any]], *, rss_kb: int, fds: int) -> list[str]:
     delta = growth(samples)
     found = []

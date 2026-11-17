@@ -22,7 +22,7 @@ from src.bus.metrics import LatencyStats
 from src.clock import SystemClock
 from src.emotion.engine import EmotionEngine
 from src.mapping.table import MappingTable
-from src.models import NormOp, RawIncoming, public_event
+from src.models import LiveEvent, NormOp, RawIncoming, public_event
 from src.normalize.pipeline import Normalizer
 from src.print_show.jobs import PrintShow
 from src.settings import Settings
@@ -100,6 +100,7 @@ class Context:
             asyncio.create_task(self._watch_config(), name="config-watch"),
             asyncio.create_task(self._broadcast_emotion(), name="emotion-broadcast"),
             asyncio.create_task(self._tick_prints(), name="print-tick"),
+            asyncio.create_task(self._purge_photos(), name="photo-retention"),
         ]
         self._started = True
         logger.info(
@@ -172,6 +173,34 @@ class Context:
             logger.exception("情绪或打印下游失败")
         self.stats.observe((time.perf_counter() - started) * 1000)
         return {"ok": True, "op": result.op.value, "event_id": result.event.event_id}
+
+    async def replay_session(self) -> dict[str, object]:
+        """把本场已入库的事件按时间再送一遍，供回看和回归。不重新保存，也不连接平台。"""
+
+        events = self.store.list_events_asc()
+        for event in events:
+            self.bus.publish("event", {"op": "replay", "event": event})
+            try:
+                live = LiveEvent.model_validate(event)
+                resolution = self.emotion.handle(live, op="replay")
+                self.printer.maybe_autoprint(live, resolution)
+            except Exception:
+                logger.exception("本场回放下游失败")
+        self.audit.record("session_replay", {"count": len(events)})
+        return {"replayed": len(events)}
+
+    def purge_expired_photos(self) -> dict[str, object]:
+        from src.ops.retention import cleanup_expired_photos
+
+        result = cleanup_expired_photos(
+            self.store,
+            now=self.clock.time(),
+            retention_days=self.settings.retention_days(),
+            dry_run=False,
+        )
+        if result["deleted"]:
+            self.audit.record("retention_cleanup", {**result, "periodic": True})
+        return result
 
     async def set_collection_enabled(self, enabled: bool) -> dict[str, object]:
         previous = self.settings.update_collection_enabled(enabled)
@@ -419,6 +448,14 @@ class Context:
             except Exception:
                 logger.exception("虚拟打印推进失败")
             await asyncio.sleep(0.1)
+
+    async def _purge_photos(self) -> None:
+        while True:
+            await asyncio.sleep(60)
+            try:
+                self.purge_expired_photos()
+            except Exception:
+                logger.exception("到期照片清理失败")
 
 
 def build_context(root: Path, clock: SystemClock | None = None) -> Context:

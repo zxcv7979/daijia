@@ -126,6 +126,15 @@ class Store:
             ).fetchall()
         return [json.loads(row["payload"]) for row in rows]
 
+    def list_events_asc(self, limit: int = 2000) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 5000))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM events ORDER BY ts ASC, event_id ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
+
     def save_job(self, job: dict[str, Any]) -> None:
         payload = json.dumps(job, ensure_ascii=False)
         with self._lock:

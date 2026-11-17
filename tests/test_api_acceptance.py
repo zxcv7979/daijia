@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -251,6 +252,7 @@ def test_event_to_ws_latency_under_100ms(project, capsys: pytest.CaptureFixture[
     assert e2e_p99 < 100
     captured = capsys.readouterr()
     assert "LATENCY" in captured.out
+    sys.stderr.write(captured.out)
 
 
 def test_sample_files_cover_required_scenes():

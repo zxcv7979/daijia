@@ -217,23 +217,25 @@ SQLite 在 `data/live_show.db`，存打码后的事件、虚拟打印任务和�
 1. **管线入队**：`ingest` 入口到信封 `put_nowait` 进每个 WebSocket 队列。包含规范化和 SQLite 写入，不含浏览器网络栈。`GET /api/metrics` 的 `latency_ms.p50` / `p99` 就是这个数。
 2. **本机端到端**：测试里起一个 localhost 进程，`POST /api/events/simulate` 之后从 `/ws` 读到对应 `event_id`。包含这次 HTTP 往返。
 
-自动化门禁是这两条的 p99 都要小于 100ms，见 `tests/test_api_acceptance.py::test_event_to_ws_latency_under_100ms`。
+正式标准是同一台机器低于 300ms。自动化门禁更严，两条 p99 都要小于 100ms，见 `tests/test_api_acceptance.py::test_event_to_ws_latency_under_100ms`。
 
-本次在当前环境、30 条本机点赞上测到：
+这次 30 条本机点赞：
 
 | 口径 | p50 | p99 |
 | --- | --- | --- |
-| 管线入队 | 2.27 ms | 3.59 ms |
-| HTTP 注入到 WS 读回 | 16.22 ms | 20.59 ms |
+| 管线入队 | 1.540 ms | 4.406 ms |
+| HTTP 注入到 WS 读回 | 17.491 ms | 24.612 ms |
 
 丢弃数为 0。换机器数字会浮动，以测试是否仍低于 100ms 为准。
 
 200 条/秒由 `POST /api/replay/burst`（`count=200`，`window_sec=1`）注入互不合并的模拟点赞。`tests/test_api_acceptance.py::test_burst_endpoint_two_hundred_in_one_second` 断言收到 200、发布 200、丢弃 0。另有一个无间隔的 200 并发注入测试，同样要求零丢弃。
 
+正式的量化标准在 [docs/acceptance-checklist.md](docs/acceptance-checklist.md)。测不到的项标成待实机验收，不补假数字。
+
 ## 验收清单
 
 - [x] 端到端演示不连接真实平台。官方适配器是禁用桩，默认采集关闭。
-- [x] 本机事件到 WS 的 p99 低于 100ms。上面的表是本次测量；测试会再卡一次。
+- [x] 本机事件到 WS 的 p99 低于 100ms，也低于正式标准 300ms。上面的表是这次测量。
 - [x] 峰值 200 条/秒零丢弃。`test_burst_endpoint_two_hundred_in_one_second` 与 `test_two_hundred_concurrent_events_are_not_dropped`。
 - [x] 30 秒重连缓冲有效。`test_buffer_keeps_30s_and_replays_cursor` 用假时钟推进到 31 秒；`test_ws_replays_missed_events_and_strips_pii` 在断开期间触发 L4，重连后能补到 `fx_cue`。
 - [x] YAML 热加载。合法修改立刻改变 L0 情绪；非法 YAML 返回 400，进程和旧映射都还在。`test_api_rejects_bad_yaml_and_keeps_serving`。
@@ -248,7 +250,7 @@ SQLite 在 `data/live_show.db`，存打码后的事件、虚拟打印任务和�
 - [x] 映射增加关键词，弹幕仍是氛围档，不抢走礼物主秀。同时在场特效不超过 8。连续超过 12ms 绘制预算会降档。`tests/test_quality.py`。
 - [x] 特效页是 1920×1080 透明浏览器源，Three.js 参数化头、Pixi 弹幕和粒子、GSAP 时间轴。无头 Chrome 在每秒 20 条事件下绘制耗时 p95 约 0.45ms。显示帧率和 OBS 实机见 [docs/p3-benchmark.md](docs/p3-benchmark.md)，标为待实机验收。
 
-本次 `python -m pytest -q`：**56 passed**。
+本次 `python -m pytest -q` 的条数以仓库测试为准，见 `docs/acceptance-checklist.md`。
 
 预设角色圆圆、青青、禾禾在 `data/avatars/presets/`，说明见 [docs/avatars.md](docs/avatars.md)。照片任务要先同意；没有 NVIDIA GPU 时生成参数化头，GPU 在 60 秒内出 GLB 标成待实机验收。切换角色会交叉淡入，新文件没好就留着上一帧。
 

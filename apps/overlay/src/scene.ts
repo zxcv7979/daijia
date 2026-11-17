@@ -24,6 +24,8 @@ export type SceneHandle = {
   recoverContext: () => boolean;
 };
 
+export const AVATAR_SWITCH_SEC = 0.28;
+
 const EMOTION_COLOR: Record<string, number> = {
   ambient: 0x8ec8ff,
   joy: 0xf0a202,
@@ -261,13 +263,13 @@ export function createScene(width: number, height: number): SceneHandle | null {
       scene.add(next);
       const previous = shown;
       shown = next;
-      gsap.to({ value: 0 }, { value: 1, duration: 0.35, onUpdate() { opacityOf(next, this.targets()[0].value); } });
+      gsap.to({ value: 0 }, { value: 1, duration: AVATAR_SWITCH_SEC, onUpdate() { opacityOf(next, this.targets()[0].value); } });
       if (previous && previous !== next) {
         gsap.to(
           { value: 1 },
           {
             value: 0,
-            duration: 0.35,
+            duration: AVATAR_SWITCH_SEC,
             onUpdate() { opacityOf(previous, this.targets()[0].value); },
             onComplete() { scene.remove(previous); },
           },
