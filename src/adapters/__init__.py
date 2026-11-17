@@ -1,4 +1,4 @@
-"""事件源适配器。P1 只有本地回放，官方源是禁用桩。"""
+"""事件源适配器。模拟源可直接跑；官方源是禁用桩。"""
 
 from src.adapters.official import OfficialAdapterStub
 from src.adapters.sim_replay import SCENES, SimReplay

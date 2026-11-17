@@ -49,6 +49,12 @@ class Store:
                     action TEXT NOT NULL,
                     detail TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS raw_payloads (
+                    id TEXT PRIMARY KEY,
+                    adapter TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    blob TEXT NOT NULL
+                );
                 """
             )
             self._conn.commit()
@@ -150,6 +156,45 @@ class Store:
                 {"ts": row["ts"], "action": row["action"], "detail": json.loads(row["detail"])}
             )
         return result
+
+    def save_raw(self, raw_id: str, adapter: str, created_at: float, blob: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO raw_payloads (id, adapter, created_at, blob) VALUES (?, ?, ?, ?)",
+                (raw_id, adapter, created_at, blob),
+            )
+            self._conn.commit()
+
+    def list_raw(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, adapter, created_at, length(blob) AS size FROM raw_payloads ORDER BY created_at DESC"
+            ).fetchall()
+        return [
+            {"id": row["id"], "adapter": row["adapter"], "created_at": row["created_at"], "size": row["size"]}
+            for row in rows
+        ]
+
+    def get_raw_blob(self, raw_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute("SELECT blob FROM raw_payloads WHERE id = ?", (raw_id,)).fetchone()
+        if row is None:
+            return None
+        return str(row["blob"])
+
+    def count_raw(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) AS n FROM raw_payloads").fetchone()
+        return int(row["n"])
+
+    def delete_raw(self, raw_id: str | None = None) -> int:
+        with self._lock:
+            if raw_id is None:
+                cur = self._conn.execute("DELETE FROM raw_payloads")
+            else:
+                cur = self._conn.execute("DELETE FROM raw_payloads WHERE id = ?", (raw_id,))
+            self._conn.commit()
+            return int(cur.rowcount)
 
     def close(self) -> None:
         with self._lock:

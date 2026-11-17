@@ -31,6 +31,7 @@ class LatencyStats:
             "latency_ms": {
                 "n": len(samples),
                 "p50": _percentile(samples, 50),
+                "p95": _percentile(samples, 95),
                 "p99": _percentile(samples, 99),
                 "max": samples[-1] if samples else None,
             },

@@ -15,5 +15,6 @@ audit:
 
 live_collection:
   default_enabled: false
+  real_source_env: REAL_SOURCE
   official_adapter: disabled
-  note: "P1 不实现任何平台登录、签名、Cookie、反爬或官方接口。"
+  note: "真实源默认关闭。二次确认后也只注册桩适配器，不实现任何平台登录、签名、Cookie 或非官方采集。"

@@ -22,6 +22,7 @@ class ConfigError(Exception):
 
 class LiveCfg(BaseModel):
     collection_enabled: bool = False
+    real_source: bool = False
 
 
 class ServerCfg(BaseModel):
@@ -52,9 +53,31 @@ class SimReplayCfg(BaseModel):
         return value
 
 
+class GovernanceCfg(BaseModel):
+    queue_max: int = Field(default=4000, ge=1, le=100_000)
+    dedup_window_sec: int = Field(default=30, ge=1, le=600)
+    heartbeat_interval_sec: float = Field(default=1, gt=0, le=30)
+    heartbeat_timeout_sec: float = Field(default=3, gt=0, le=60)
+    backoff_base_sec: float = Field(default=0.2, gt=0, le=5)
+    backoff_factor: float = Field(default=2, ge=1, le=8)
+    backoff_cap_sec: float = Field(default=5, gt=0, le=5)
+    stable_after_sec: float = Field(default=2, gt=0, le=60)
+    drop_policy: str = "drop_oldest"
+
+    @field_validator("drop_policy")
+    @classmethod
+    def _policy(cls, value: str) -> str:
+        if value != "drop_oldest":
+            raise ValueError("P2 背压策略只允许 drop_oldest")
+        return value
+
+
 class OfficialCfg(BaseModel):
     enabled: bool = False
     mode: str = "stub"
+    # 占位。空字符串表示还没有用户提供的官方合同或 SDK 名称。
+    contract: str = ""
+    credential_env: str = ""
 
     @field_validator("enabled")
     @classmethod
@@ -74,6 +97,7 @@ class OfficialCfg(BaseModel):
 class AdaptersCfg(BaseModel):
     sim_replay: SimReplayCfg = Field(default_factory=SimReplayCfg)
     official: OfficialCfg = Field(default_factory=OfficialCfg)
+    governance: GovernanceCfg = Field(default_factory=GovernanceCfg)
 
 
 class NormalizeCfg(BaseModel):
@@ -257,6 +281,9 @@ class Settings:
     def collection_enabled(self) -> bool:
         return bool(self.default_model.live.collection_enabled)
 
+    def real_source_configured(self) -> bool:
+        return bool(self.default_model.live.real_source)
+
     def samples_dir(self) -> Path:
         raw = Path(self.default_model.adapters.sim_replay.samples_dir)
         if not raw.is_absolute():
@@ -299,6 +326,25 @@ class Settings:
             raise ConfigError("找不到 live.collection_enabled，拒绝写入")
         path.write_text(updated, encoding="utf-8")
         self.default_model.live.collection_enabled = enabled
+        self._note(path)
+        return previous
+
+    def update_real_source(self, enabled: bool) -> bool:
+        """只改配置文件。运行时是否生效由二次确认决定。"""
+
+        previous = self.real_source_configured()
+        path = self.config_dir / "default.yaml"
+        file_text = _read_text(path)
+        updated, count = re.subn(
+            r"(real_source:\s*)(true|false)",
+            r"\g<1>" + ("true" if enabled else "false"),
+            file_text,
+            count=1,
+        )
+        if count != 1:
+            raise ConfigError("找不到 live.real_source，拒绝写入")
+        path.write_text(updated, encoding="utf-8")
+        self.default_model.live.real_source = enabled
         self._note(path)
         return previous
 

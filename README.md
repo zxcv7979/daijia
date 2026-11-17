@@ -128,12 +128,23 @@ python -m pytest -q
 
 覆盖：去重、连击合并、200ms 聚合（并确认 1.5 秒不会被当成 2 秒窗口）、打码、情绪曲线和压低、弹幕不抢主秀、打印里程碑、30 秒缓冲、非法 YAML、采集审计、200 条峰值零丢弃、三个剧本、L0–L4 和虚拟打印、WebSocket 补发。
 
+P2 另有：重连退避不超过 5 秒、按 `event_id` 的去重窗口、队列满时丢最旧并告警、真实源二次确认与审计、加密原文删除，以及 1000 条/秒模拟压测。
+
+```bash
+python scripts/load_test.py
+python -m pytest -q tests/test_load.py
+```
+
+压测数字见 [docs/p2-load-test.md](docs/p2-load-test.md)。官方接入只核对公开资料，见 [docs/douyin-official-ingest-checklist.md](docs/douyin-official-ingest-checklist.md)。
+
 ## 配置
 
 `config/default.yaml` 里和演示直接相关的键：
 
 - `live.collection_enabled`：默认 `false`。
-- `adapters.sim_replay`：样本目录和 1/5/20 速度。`adapters.official.enabled` 必须是 `false`，热加载也不允许改成开启。
+- `live.real_source`：默认 `false`。环境变量 `REAL_SOURCE` 不设置也是关闭；设成 `false` / `0` 时，确认接口也会拒绝打开。改配置文件本身不会把真实源打开，管理页或 `POST /api/compliance/real-source` 必须带二次确认。
+- `adapters.sim_replay`：样本目录和 1/5/20 速度。`adapters.official.enabled` 必须是 `false`，热加载也不允许改成开启。`contract` 和 `credential_env` 只是占位。
+- `adapters.governance`：心跳、退避上限 5 秒、`event_id` 去重窗口、队列容量。队列满时丢掉最旧的一条并记 `backpressure` 告警，好让新的观众事件还能进来。
 - `normalize.danmaku_aggregate_window_ms`：必须是 `200`。
 - `emotion.rise_ms`：150–300。`decay_half_life_s`：4–8。`max_on_screen` 和 `ducking` 控制同时在场的情绪。
 - `print_show.default_duration_sec`：默认 45 秒。进度点固定 25/50/75/90/100。
@@ -151,7 +162,7 @@ python -m pytest -q
 
 改映射可以在管理页保存，也可以直接改文件。进程大约每 0.4 秒看一次文件。解析失败时保留上一份，并记在 `GET /api/health` 的 `config_error`。
 
-SQLite 在 `data/live_show.db`，只存打码后的事件、虚拟打印任务和审计索引。
+SQLite 在 `data/live_show.db`，存打码后的事件、虚拟打印任务和审计索引。若另外保存原文，只存 HMAC-SHA256 计数器模式加密后的密文。`DELETE /api/raw-payloads` 或管理页「删除加密原文」会清掉这些密文。WebSocket 仍然不传 `raw_ref` 和原始身份。
 
 ## 合规
 
@@ -163,6 +174,8 @@ SQLite 在 `data/live_show.db`，只存打码后的事件、虚拟打印任务�
 - 把 `config/default.yaml` 的 `collection_enabled` 改成 `true`（启动时已经是 `true` 也会记一条）。
 
 审计文件：`data/audit/audit.jsonl`。
+
+真实源是另一道开关。管理页勾选「真实源」后还会再弹一次确认；接口要 `{"enabled": true, "confirm": true}` 才会写 `real_source_enabled` 审计。确认之后可以 `POST /api/adapters/official/start` 做健康检查，返回降级且 `events_pushed` 为 0。模拟源 `mock` 不依赖这道开关。没有实现非官方采集。
 
 ## WebSocket
 
@@ -203,8 +216,15 @@ SQLite 在 `data/live_show.db`，只存打码后的事件、虚拟打印任务�
 - [x] YAML 热加载。合法修改立刻改变 L0 情绪；非法 YAML 返回 400，进程和旧映射都还在。`test_api_rejects_bad_yaml_and_keeps_serving`。
 - [x] 管理页能触发 L0–L4，也能创建虚拟打印并跑到 `done`。对应 API 测试：`test_manual_levels_and_print_job`。页面按钮走同一组接口。
 - [x] 三个剧本可从 API 启动。小礼物合并成一条 `combo_count=10` 的喜悦事件且不打印；榜一礼物开出全息任务且情绪保持震撼。`test_scripted_scenes`。
+- [x] `REAL_SOURCE` 关闭时，回放、模拟源和演示管道仍可用。没有二次确认就不会写 `real_source_enabled`。`test_real_source_off_keeps_demo_and_blocks_silent_enable`。
+- [x] 二次确认后可以健康检查官方桩，状态是降级，推送条数为 0，并写审计。`test_confirmed_real_source_audits_and_degrades`。
+- [x] 重连退避不超过 5 秒，`event_id` 去重窗口，队列满时丢最旧并告警。`tests/test_governance.py`。
+- [x] 原文加密保存，列表接口不回明文，`DELETE /api/raw-payloads` 能删光。`test_encrypted_raw_roundtrip_and_delete`。
+- [x] 模拟源 1000 条/秒。见 [docs/p2-load-test.md](docs/p2-load-test.md)。入队到总线 p99 约 1.24 ms，峰值内存约 1.5 MB，按策略没有丢弃。
 
-本次 `python -m pytest -q`：**35 passed**。
+本次 `python -m pytest -q`：**44 passed**。
+
+没有实现非官方采集，也没有平台请求格式或签名算法。官方接入核对清单在 [docs/douyin-official-ingest-checklist.md](docs/douyin-official-ingest-checklist.md)。
 
 ## 数据流
 

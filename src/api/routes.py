@@ -60,6 +60,16 @@ class CollectionIn(BaseModel):
     enabled: bool
 
 
+class RealSourceIn(BaseModel):
+    enabled: bool
+    confirm: bool = False
+
+
+class RawIn(BaseModel):
+    adapter: str = "mock"
+    payload: dict[str, object]
+
+
 class SimulateIn(BaseModel):
     source_msg_id: str | None = None
     type: EventType
@@ -220,17 +230,115 @@ async def create_job(body: PrintIn, request: Request) -> dict[str, object]:
 
 @router.get("/api/compliance")
 async def compliance(request: Request) -> dict[str, object]:
-    ctx = _ctx(request)
-    return {
-        "collection_enabled": ctx.settings.collection_enabled(),
-        "official_adapter": "disabled",
-        "note": "真实采集默认关闭。打开后只写审计日志，不会连接平台。",
-    }
+    return _ctx(request).compliance_view()
 
 
 @router.post("/api/compliance/collection")
 async def set_collection(body: CollectionIn, request: Request) -> dict[str, object]:
     return await _ctx(request).set_collection_enabled(body.enabled)
+
+
+@router.post("/api/compliance/real-source")
+async def set_real_source(body: RealSourceIn, request: Request) -> dict[str, object]:
+    result = await _ctx(request).set_real_source(body.enabled, body.confirm)
+    status = int(result.pop("status"))
+    if status != 200:
+        raise HTTPException(status_code=status, detail=str(result.get("detail")))
+    return result
+
+
+@router.get("/api/adapters")
+async def list_adapters(request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    return {
+        "real_source_active": ctx.sources.real_source_active,
+        "adapters": ctx.sources.describe(),
+        "governor": ctx.sources.governor.snapshot(),
+    }
+
+
+@router.post("/api/adapters/{name}/start")
+async def start_adapter(name: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    try:
+        return await ctx.sources.start(name, real_allowed=ctx.sources.real_source_active)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未知适配器") from exc
+
+
+@router.post("/api/adapters/{name}/stop")
+async def stop_adapter(name: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    try:
+        return await ctx.sources.stop(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未知适配器") from exc
+
+
+@router.get("/api/adapters/{name}/health")
+async def adapter_health(name: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    try:
+        return ctx.sources.health(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未知适配器") from exc
+
+
+@router.get("/api/adapters/{name}/metrics")
+async def adapter_metrics(name: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    try:
+        return ctx.sources.metrics(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未知适配器") from exc
+
+
+@router.post("/api/adapters/{name}/reconnect")
+async def reconnect_adapter(name: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    try:
+        return await ctx.sources.reconnect(
+            name,
+            now=ctx.clock.time(),
+            real_allowed=ctx.sources.real_source_active,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未知适配器") from exc
+
+
+@router.post("/api/adapters/{name}/heartbeat")
+async def heartbeat_adapter(name: str, request: Request) -> dict[str, object]:
+    ctx = _ctx(request)
+    try:
+        return ctx.sources.heartbeat(name, ctx.clock.time())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未知适配器") from exc
+
+
+@router.get("/api/raw-payloads")
+async def list_raw(request: Request) -> list[dict[str, object]]:
+    return _ctx(request).store.list_raw()
+
+
+@router.post("/api/raw-payloads")
+async def create_raw(body: RawIn, request: Request) -> dict[str, object]:
+    if body.adapter not in {"sim", "mock"}:
+        raise HTTPException(status_code=400, detail="只加密保存本地模拟原文")
+    return _ctx(request).save_encrypted_raw(body.adapter, body.payload)
+
+
+@router.delete("/api/raw-payloads")
+async def delete_raw_all(request: Request) -> dict[str, object]:
+    deleted = _ctx(request).store.delete_raw()
+    return {"deleted": deleted}
+
+
+@router.delete("/api/raw-payloads/{raw_id}")
+async def delete_raw_one(raw_id: str, request: Request) -> dict[str, object]:
+    deleted = _ctx(request).store.delete_raw(raw_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="找不到原文")
+    return {"deleted": deleted}
 
 
 @router.get("/api/audit")

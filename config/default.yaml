@@ -3,6 +3,8 @@
 
 live:
   collection_enabled: false
+  # 真实源默认关闭。即使改成 true，进程内仍要二次确认才会进入可注册状态。
+  real_source: false
 
 server:
   host: 127.0.0.1
@@ -17,9 +19,22 @@ adapters:
     speeds: [1, 5, 20]
     loop: false
   official:
-    # P1 禁止打开。没有登录、签名、Cookie 或平台接口实现。
+    # 必须保持关闭。没有登录、签名、Cookie 或平台接口实现。
     enabled: false
     mode: stub
+    contract: ""
+    credential_env: ""
+  governance:
+    queue_max: 4000
+    dedup_window_sec: 30
+    heartbeat_interval_sec: 1
+    heartbeat_timeout_sec: 3
+    backoff_base_sec: 0.2
+    backoff_factor: 2
+    backoff_cap_sec: 5
+    stable_after_sec: 2
+    # 队列满时丢掉最旧的一条，腾出位置给新事件，并记告警。
+    drop_policy: drop_oldest
 
 normalize:
   dedup_window_sec: 30

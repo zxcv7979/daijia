@@ -91,6 +91,16 @@ app.innerHTML = `
           <input id="collect" type="checkbox" />
           真实采集（打开只写审计，不连接平台）
         </label>
+        <label class="check">
+          <input id="real-source" type="checkbox" />
+          真实源 REAL_SOURCE（需再确认一次，仍不连接平台）
+        </label>
+        <div class="row">
+          <button id="start-mock" type="button">启动模拟源</button>
+          <button id="health-official" type="button">检查官方桩</button>
+          <button id="delete-raw" type="button">删除加密原文</button>
+        </div>
+        <p id="adapter-note" class="muted"></p>
         <div id="audit" class="audit"></div>
       </div>
     </section>
@@ -325,8 +335,9 @@ function setYamlMessage(text: string, ok: boolean) {
 }
 
 async function boot() {
-  const compliance = await api<{ collection_enabled: boolean }>("/api/compliance");
+  const compliance = await api<{ collection_enabled: boolean; real_source_active: boolean }>("/api/compliance");
   must<HTMLInputElement>("collect").checked = compliance.collection_enabled;
+  must<HTMLInputElement>("real-source").checked = compliance.real_source_active;
   const emotion = await api<Emotion>("/api/emotion");
   showEmotion(emotion);
   const scenes = await api<Array<{ name: string; title: string }>>("/api/scenes");
@@ -440,6 +451,52 @@ must<HTMLButtonElement>("print").addEventListener("click", () => {
       duration_sec: duration,
     }),
   }).then(refreshJobs).catch(showPageError);
+});
+
+must<HTMLInputElement>("real-source").addEventListener("change", (ev) => {
+  const box = ev.target as HTMLInputElement;
+  if (box.checked && !window.confirm("第二次确认：打开真实源只会写审计并允许检查官方桩，不会连接任何平台。确认？")) {
+    box.checked = false;
+    return;
+  }
+  void api<{ real_source_active: boolean }>("/api/compliance/real-source", {
+    method: "POST",
+    body: JSON.stringify({ enabled: box.checked, confirm: box.checked }),
+  })
+    .then(async (body) => {
+      box.checked = body.real_source_active;
+      await refreshAudit();
+    })
+    .catch((error: unknown) => {
+      box.checked = !box.checked;
+      showPageError(error);
+    });
+});
+
+must<HTMLButtonElement>("start-mock").addEventListener("click", () => {
+  void api("/api/adapters/mock/start", { method: "POST" })
+    .then((body) => {
+      must<HTMLParagraphElement>("adapter-note").textContent = `模拟源 ${JSON.stringify(body)}`;
+    })
+    .catch(showPageError);
+});
+
+must<HTMLButtonElement>("health-official").addEventListener("click", () => {
+  void api<Record<string, unknown>>("/api/adapters/official/health")
+    .then((body) => {
+      must<HTMLParagraphElement>("adapter-note").textContent = `官方桩 ${String(body.state ?? "")} ${String(body.detail ?? "")}`;
+    })
+    .catch(showPageError);
+});
+
+must<HTMLButtonElement>("delete-raw").addEventListener("click", () => {
+  void fetch("/api/raw-payloads", { method: "DELETE" })
+    .then(async (response) => {
+      const body = await response.json();
+      if (!response.ok) throw new Error("删除失败");
+      must<HTMLParagraphElement>("adapter-note").textContent = `已删除加密原文 ${String(body.deleted)} 条`;
+    })
+    .catch(showPageError);
 });
 
 must<HTMLInputElement>("collect").addEventListener("change", (ev) => {
